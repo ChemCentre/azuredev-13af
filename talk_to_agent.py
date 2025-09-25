@@ -11,7 +11,7 @@ agent_id = os.getenv("AZURE_AGENT_ID")
 url=f"{endpoint}/agents/{agent_id}/invoke"
 
 headers={
-    "Authorization": api_key,
+    "api-key": api_key,
     "Content-Type":"application/json"
 }
 
