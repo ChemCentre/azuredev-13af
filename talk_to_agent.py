@@ -4,15 +4,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-endpoint = os.getenv("AZURE_ENDPOINT")
-api_key = os.getenv("AZURE_API_KEY")
+endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+api_key = os.getenv("AZURE_OPENAI_KEY")
 project_id = os.getenv("AZURE_PROJECT_ID")
 agent_id = os.getenv("AZURE_AGENT_ID")
 
 url=f"{endpoint}/api/projects/{project_id}/agents/{agent_id}/invoke"
 
 headers={
-    "Authorization":f"Bearer {api_key}",
+    "api-key":api_key,
     "Content-Type":"application/json"
 }
 
