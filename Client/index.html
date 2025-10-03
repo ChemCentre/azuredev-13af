@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Agent Chat</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="chat-container">
+
+    <!-- Sidebar Container (mini + main sidebar) -->
+    <div class="sidebar-container">
+      
+      <!-- Mini Sidebar -->
+      <div class="mini-sidebar">
+        <button class="mini-icon" title="Settings">⚙️</button>
+        <button class="mini-icon" title="About">ℹ️</button>
+        <button class="mini-icon toggle-btn" title="Collapse">⬅️</button>
+      </div>
+
+      <!-- Main Sidebar -->
+      <div class="sidebar">
+        <img src="Images/PitPixie-logo.png" class="sidebar-logo" alt="PitPixie Logo">
+        <button class="new-chat">+ New Chat</button>
+
+        <h3>Chat History</h3>
+        <div class="chat-history"></div>
+      </div>
+    </div>
+
+    <!-- Chat Window -->
+    <div class="chat-window">
+      <div class="chat-header">
+        <button class="export-btn">Export</button>
+      </div>
+      
+      <!-- Welcome screen (shown initially) -->
+      <div class="welcome-screen">
+        <h1>What are we mining today?</h1>
+          <div class="welcome-input">
+              <label for="welcome-file" class="upload-btn">+</label>
+              <input type="file" id="welcome-file" style="display: none;" />
+              <textarea class="welcome-message-input" placeholder="Ask anything..."></textarea>
+              <button class="welcome-send-btn">Send</button>
+          </div>
+      </div>
+
+      <!-- Empty chat area -->
+      <div class="chat-messages" style="display:none;"></div>
+
+      <div class="chat-input" style="display:none;">
+        <label for="file-upload" class="upload-btn">+</label>
+        <input type="file" id="file-upload" style="display: none;" />
+        <textarea class="message-input" placeholder="Type your message..."></textarea>
+        <button class="send-btn">Send</button>
+      </div>
+    </div>
+
+    <div class="settings-window" id="settings-window" style="display: none;">
+      <div class="settings-header">
+        <h2>Settings</h2>
+        <button id="back-to-chat">⬅ Back</button>
+      </div>
+
+      <div class="settings-content">
+        <label>
+          Export Format:
+          <select id="config-export">
+            <option value="csv" selected>CSV</option>
+            <option value="txt">TXT</option>
+            <option value="json">JSON</option>
+          </select>
+        </label>
+
+        <label>
+          Theme:
+          <select id="config-theme">
+            <option value="light" selected>Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <!-- About Window -->
+      <div class="about-window" id="about-window" style="display: none;">
+        <div class="about-header">
+          <h2>About</h2>
+          <button id="back-to-chat-from-about">⬅ Back</button>
+        </div>
+
+        <iframe src="about.html" class="about-iframe"></iframe>
+      </div>
+
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>
