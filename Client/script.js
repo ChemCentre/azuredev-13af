@@ -4,7 +4,7 @@ const input = document.querySelector(".message-input");
 const sendBtn = document.querySelector(".send-btn");
 const chatMessages = document.querySelector(".chat-messages");
 const fileInput = document.querySelector("#file-upload");
-const newChatBtn = document.querySelector(".new-chat");
+const newChatBtn = document.querySelector(".new-chat-btn");
 const chatHistoryContainer = document.querySelector(".chat-history");
 
 const welcomeInput = document.querySelector(".welcome-message-input");
@@ -47,6 +47,11 @@ function createHistoryButton(chatId, title) {
 function setActiveChat(chatId) {
   if (!chats[chatId]) return;
   currentChatId = chatId;
+
+  // Show chat window if hidden
+  chatWindow.style.display = "flex";
+  settingsWindow.style.display = "none";
+  aboutWindow.style.display = "none";
 
   // update active class on sidebar buttons
   document.querySelectorAll(".chat-history .history-item").forEach(b => {
@@ -253,9 +258,29 @@ exportSelect.addEventListener("change", () => {
   localStorage.setItem("exportFormat", exportSelect.value);
 });
 
-themeSelect.addEventListener("change", () => {
-  localStorage.setItem("theme", themeSelect.value);
-  document.body.setAttribute("data-theme", themeSelect.value); // apply theme
+/*Applying the dark theme */
+
+window.addEventListener("DOMContentLoaded", () => {
+  function applyTheme(theme) {
+    document.body.setAttribute("data-theme", theme);
+
+    const iframe = document.querySelector(".about-iframe");
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage({ theme }, "*");
+    }
+  }
+
+  // Apply saved theme on page load
+  const savedTheme = localStorage.getItem("theme") || "light";
+  applyTheme(savedTheme);
+  themeSelect.value = savedTheme; // sync dropdown with current theme
+
+  // Update theme on change
+  themeSelect.addEventListener("change", () => {
+    const theme = themeSelect.value;
+    localStorage.setItem("theme", theme);
+    applyTheme(theme);
+  });
 });
 
 //About js

@@ -9,15 +9,16 @@
 /* Main Container */
 .chat-container {
   display: flex;
+  flex-direction: row;
   height: 100vh;
   width: 100%;
-  transition: all 0.3s ease;
+  overflow: hidden;
 }
 
 /* Container holds both sidebars */
 .sidebar-container {
   display: flex;
-  height: 100vh;
+  flex-shrink: 0;
 }
 
 /* Mini sidebar with icons */
@@ -51,16 +52,16 @@
 
 /* Sidebar */
 .sidebar {
+  min-width: 280px;
   width: 280px; /* expanded width */
   background-color: #185763;
-  padding: 20px;
   color: #D3E5E8;
-  overflow-y: auto;
   transition: width 0.3s ease, opacity 0.3s ease; 
 }
 
 .sidebar.collapsed {
    width: 0;
+   min-width: 0;
   opacity: 0;
   padding: 0;
   border: none;
@@ -84,13 +85,13 @@
   font-size: 30px;
 }
 
-.new-chat {
+.new-chat-btn{
   width: 100%;
   padding: 10px;
   margin-bottom: 20px;
   border: 1px solid #aaa;
   border-radius: 8px;
-  background: white;
+  background: #D3E5E8;
   cursor: pointer;
 }
 
@@ -131,6 +132,7 @@ h3 {
 /* Chat Window */
 .chat-window {
   flex: 1;
+  min-width: 0;
   background: #D3E5E8;
   display: flex;
   flex-direction: column;
@@ -293,9 +295,11 @@ h3 {
   cursor: pointer;
 }
 
+/* Settings CSS */
+
 .settings-window {
   flex: 1;
-  background: #fefefe;
+  background: #D3E5E8;
   padding: 20px;
   display: none;
   flex-direction: column;
@@ -331,30 +335,24 @@ h3 {
 
 .settings-content select {
   margin-top: 6px;
-  width: 100%;
+  width: auto; /* or set a fixed width like 200px */
+  min-width: 150px;
+  max-width: 250px;
   padding: 8px;
   border-radius: 6px;
   border: 1px solid #aaa;
+  font-size: 1rem;
 }
 
 .chat-window, .settings-window {
   transition: all 0.3s ease-in-out;
 }
 
-body[data-theme="dark"] {
-  background: #1e1e1e;
-  color: #eee;
-}
-
-body[data-theme="dark"] .chat-window {
-  background: #2a2a2a;
-}
-
 /*About CSS */
 
 .about-window {
   flex: 1;
-  background: #fefefe;
+  background: #D3E5E8;
   padding: 20px;
   display: none;
   flex-direction: column;
@@ -394,4 +392,144 @@ body[data-theme="dark"] .chat-window {
   width: 100%;
   height: 100%;
   border: none;
+}
+
+/* Dark Theme Option */
+
+/* Global background and text */
+body[data-theme="dark"] {
+  background: #14213D;
+  color: #eee;
+}
+
+/* Main chat window */
+body[data-theme="dark"] .chat-window {
+  background:#14213D;
+}
+
+/* Message area */
+body[data-theme="dark"] .chat-messages {
+  background:#14213D;
+}
+
+body[data-theme="dark"] .message.user {
+  background: #283757;
+  color: #fff;
+}
+
+body[data-theme="dark"] .message.ai {
+  background: #283757;
+  color: #eee;
+}
+
+body[data-theme="dark"] .message.typing {
+  background: transparent;
+  color: #aaa;
+}
+
+/* Input boxes */
+body[data-theme="dark"] .chat-input,
+body[data-theme="dark"] .welcome-input {
+  background: #14213D;
+  border: 1px solid #14213D;
+}
+
+body[data-theme="dark"] .message-input,
+body[data-theme="dark"] .welcome-message-input {
+  background: #283757;
+  color: #eee;
+  border: 1px solid #666;
+}
+
+/* Welcome screen */
+body[data-theme="dark"] .welcome-screen {
+  background:  #14213D;
+  color: #eee;
+}
+
+/* Sidebar and mini-sidebar */
+body[data-theme="dark"] .sidebar,
+body[data-theme="dark"] .sidebar-logo,
+body[data-theme="dark"] .mini-sidebar {
+  background: #0f2f35;
+  color: #eee;
+}
+
+/* Settings panel */
+body[data-theme="dark"] .settings-window {
+  background: #14213D;
+  color: #eee;
+}
+
+body[data-theme="dark"] .settings-header {
+  background: #14213D;
+  color: #eee;
+}
+
+body[data-theme="dark"] .settings-header h2 {
+  color: #eee;
+}
+
+body[data-theme="dark"] .settings-content label {
+  color: #eee;
+}
+
+body[data-theme="dark"] .settings-content select {
+  background: #283757;
+}
+
+/* About panel */
+body[data-theme="dark"] .about-window {
+  background:  #14213D;
+  color: #eee;
+}
+
+body[data-theme="dark"] .about-header {
+  background: #14213D;
+  color: #eee;
+}
+
+body[data-theme="dark"] .about-header h2 {
+  color: #eee;
+}
+
+/* Buttons and dropdowns */
+body[data-theme="dark"] .send-btn,
+body[data-theme="dark"] .welcome-send-btn,
+body[data-theme="dark"] .new-chat-btn,
+body[data-theme="dark"] .export-btn,
+body[data-theme="dark"] .settings-header button,
+body[data-theme="dark"] .about-header button {
+  background: #FF7043;
+  color: #fff;
+}
+
+body[data-theme="dark"] .upload-btn {
+  background: #283757;
+  color: #eee;
+  border-color: #666;
+}
+
+body[data-theme="dark"] select,
+body[data-theme="dark"] textarea,
+body[data-theme="dark"] input {
+  background: #333;
+  color: #eee;
+  border-color: #666;
+}
+
+/* Smooth transitions */
+body,
+.chat-window,
+.chat-messages,
+.message,
+.chat-input,
+.sidebar,
+.settings-window,
+.about-window,
+textarea,
+input,
+select,
+button {
+  transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }

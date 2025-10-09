@@ -1,15 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>About PitPixie</title>
+  <style>
+  /* Light theme (default) */
+  body[data-theme="light"] {
+    background: #D3E5E8;
+    color: #222;
+  }
 
-<div class="about-content">
-  <p><strong>PitPixie</strong> is an AI-powered solution designed to help streamline document analysis,
-  enable intelligent chat with mining-related documents, and simplify reporting workflows.</p>
+  body[data-theme="light"] .about-content {
+    color: #222;
+  }
 
-  <p>✨ Features include:</p>
-  <ul>
-    <li>Chat with an AI agent</li>
-    <li>Upload and analyze files</li>
-    <li>Export results in multiple formats (CSV, TXT, JSON)</li>
-    <li>Configurable settings and themes</li>
-  </ul>
+  /* Dark theme */
+  body[data-theme="dark"] {
+    background: #14213D;
+    color: #eee;
+  }
 
-  <p><em>Developed by [Name].</em></p>
-</div>
+  body[data-theme="dark"] .about-content {
+    color: #eee;
+  }
+
+  body {
+    font-family: sans-serif;
+    padding: 20px;
+    transition: background 0.3s ease, color 0.3s ease;
+  }
+
+ body.theme-loading {
+  opacity: 0;
+}
+
+body:not(.theme-loading) {
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+</style>
+
+</head>
+<body class="theme-loading">
+  <div class="about-content">
+    <p><strong>PitPixie</strong> is an AI-powered solution designed to help streamline document analysis,
+    enable intelligent chat with mining-related documents, and simplify reporting workflows.</p>
+
+    <p>✨ Features include:</p>
+    <ul>
+      <li>Chat with an AI agent</li>
+      <li>Upload and analyze files</li>
+      <li>Export results in multiple formats (CSV, TXT, JSON)</li>
+      <li>Configurable settings and themes</li>
+    </ul>
+
+    <p><em>Developed by [Name].</em></p>
+  </div>
+
+ <script>
+  window.addEventListener("message", (event) => {
+    if (event.data.theme) {
+      document.body.setAttribute("data-theme", event.data.theme);
+      document.body.classList.remove("theme-loading");
+    }
+  });
+
+  // Optional fallback if no message received
+  setTimeout(() => {
+    if (!document.body.hasAttribute("data-theme")) {
+      document.body.setAttribute("data-theme", "light");
+      document.body.classList.remove("theme-loading");
+    }
+  }, 1000);
+</script>
+
+
+</body>
+</html>
+
+
+

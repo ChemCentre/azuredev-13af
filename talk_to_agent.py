@@ -3,9 +3,62 @@ import requests
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 
+
 load_dotenv()
 
-# ---------- 1. Azure OpenAI (raw model call) ----------
+import os
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+import os
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class FoundryClient:
+    def __init__(self, api_key: str, endpoint: str, system_prompt: str = None):
+        self.api_key = api_key
+        self.endpoint = endpoint.rstrip("/")
+        self.system_prompt = system_prompt or "You are an AI assistant."
+
+    def _call_api(self, user_prompt: str):
+        headers = {
+            "api-key": self.api_key,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "messages": [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "max_completion_tokens": 1024,
+        }
+        response = requests.post(self.endpoint, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    def get_response(self, user_prompt: str):
+        result = self._call_api(user_prompt)
+        return result["choices"][0]["message"]["content"].strip()
+
+# Load credentials
+endpoint = os.getenv("AZURE_FOUNDRY_ENDPOINT")
+api_key = os.getenv("AZURE_FOUNDRY_KEY")
+
+# Initialize client
+client = FoundryClient(api_key=api_key, endpoint=endpoint)
+
+# Test prompt
+prompt = input("Enter your prompt: ")
+response = client.get_response(prompt)
+print("\nAgent Response:\n", response)
+
+
+
+""" # ---------- 1. Azure OpenAI (raw model call) ----------
 print("=== Testing Azure OpenAI (raw deployment) ===")
 
 openai_client = AzureOpenAI(
@@ -26,6 +79,7 @@ try:
     print("OpenAI Response:", response.choices[0].message.content)
 except Exception as e:
     print("OpenAI Error:", e)
+
 
 # ---------- 2. Azure AI Foundry Agent ----------
 print("\n=== Testing Azure AI Foundry Agent ===")
@@ -53,7 +107,8 @@ try:
     else:
         print("Agent Raw Response:", resp.text)
 except Exception as e:
-    print("Agent Error:", e)
+    print("Agent Error:", e) """
+
 
 
 
