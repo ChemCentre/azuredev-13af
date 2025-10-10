@@ -38,12 +38,12 @@
       <!-- Welcome screen (shown initially) -->
       <div class="welcome-screen">
         <h1>What are we mining today?</h1>
-          <div class="welcome-input">
-              <label for="welcome-file" class="upload-btn">+</label>
-              <input type="file" id="welcome-file" style="display: none;" />
-              <textarea class="welcome-message-input" placeholder="Ask anything..."></textarea>
-              <button class="welcome-send-btn">Send</button>
-          </div>
+        <form class="welcome-input" id="upload-form" method="POST" action="/upload" enctype="multipart/form-data">
+          <label for="welcome-file" class="upload-btn">+</label>
+          <input type="file" id="welcome-file" name="doc_file" style="display: none;" />
+          <textarea class="welcome-message-input" name="message" placeholder="Ask anything..."></textarea>
+          <button type="submit" class="welcome-send-btn">Send</button>
+        </form>
       </div>
 
       <!-- Empty chat area -->
@@ -53,7 +53,7 @@
         <label for="file-upload" class="upload-btn">+</label>
         <input type="file" id="file-upload" style="display: none;" />
         <textarea class="message-input" placeholder="Type your message..."></textarea>
-        <button class="send-btn">Send</button>
+        <button class="send-btn" type="submit">Send</button>
       </div>
     </div>
     
@@ -74,26 +74,30 @@
           </select>
         </label>
 
-        <label>
+        <label for="config-theme">
           Theme:
-          <select id="config-theme">
-            <option value="light" selected>Light</option>
-            <option value="dark">Dark</option>
-          </select>
+            <div id="config-theme" class="theme-toggle">
+              <button class="theme-option" data-theme="light" title="Light Mode">
+                🌞
+              </button>
+              <button class="theme-option" data-theme="dark" title="Dark Mode">
+                🌜
+              </button>
+            </div>
         </label>
       </div>
     </div>
 
     <!-- About Window -->
-      <div class="about-window" id="about-window" style="display: none;">
-        <div class="about-header">
-          <h2>About PitPixie</h2>
+    <div class="about-window" id="about-window" style="display: none;">
+      <div class="about-header">
+        <h2>About PitPixie</h2>
           <button id="back-to-chat-from-about">⬅ Back</button>
-        </div>
-
-        <iframe src="about.html" class="about-iframe"></iframe>
       </div>
 
+      <iframe src="about.html" class="about-iframe" style="width: 100%; height: 100%; border: none;"></iframe>
+
+    </div>
   </div>
   <script src="script.js"></script>
 </body>

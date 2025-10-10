@@ -42,7 +42,7 @@ body:not(.theme-loading) {
 </style>
 
 </head>
-<body class="theme-loading">
+<body >
   <div class="about-content">
     <p><strong>PitPixie</strong> is an AI-powered solution designed to help streamline document analysis,
     enable intelligent chat with mining-related documents, and simplify reporting workflows.</p>
@@ -58,23 +58,27 @@ body:not(.theme-loading) {
     <p><em>Developed by [Name].</em></p>
   </div>
 
- <script>
-  window.addEventListener("message", (event) => {
-    if (event.data.theme) {
-      document.body.setAttribute("data-theme", event.data.theme);
+  <script>
+    function applyTheme(theme) {
+      document.body.setAttribute("data-theme", theme);
       document.body.classList.remove("theme-loading");
-    }
-  });
+    } 
 
-  // Optional fallback if no message received
-  setTimeout(() => {
-    if (!document.body.hasAttribute("data-theme")) {
-      document.body.setAttribute("data-theme", "light");
-      document.body.classList.remove("theme-loading");
-    }
-  }, 1000);
-</script>
+    window.addEventListener("message", (event) => {
+      if (event.data.theme) {
+        applyTheme(event.data.theme);
+      }
+    });
 
+    // Fallback: always remove theme-loading after 1 second
+    setTimeout(() => {
+      if (!document.body.hasAttribute("data-theme")) {
+        applyTheme("light");
+      } else {
+        document.body.classList.remove("theme-loading");
+      }
+    }, 1000);
+  </script>
 
 </body>
 </html>

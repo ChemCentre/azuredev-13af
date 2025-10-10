@@ -85,14 +85,15 @@
   font-size: 30px;
 }
 
-.new-chat-btn{
-  width: 100%;
+.new-chat-btn {
+  width: 70%;
   padding: 10px;
-  margin-bottom: 20px;
+  margin: 0 auto 20px auto; /* top: 0, bottom: 20px, left/right: auto */
   border: 1px solid #aaa;
   border-radius: 8px;
   background: #D3E5E8;
   cursor: pointer;
+  display: block;
 }
 
 h3 {
@@ -106,18 +107,20 @@ h3 {
 }
 
 .history-item {
+  width: 70%;
   padding: 10px;
   border: 1px solid #aaa;
   border-radius: 8px;
   background: #2C7C89;
   color: #fff;
-  text-align: left;
+  text-align: center;
   cursor: pointer;
   transition: background 0.2s;
   font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  margin: 0 auto 20px auto; /* top: 0, bottom: 20px, left/right: auto */
 }
 
 .history-item:hover {
@@ -348,14 +351,40 @@ h3 {
   transition: all 0.3s ease-in-out;
 }
 
+/* Theme Button */
+
+.theme-toggle {
+  display: flex;
+  gap: 20px;
+  margin-top: 5px;
+}
+
+.theme-option {
+  font-size: 24px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 10px;
+  transition: transform 0.2s ease;
+}
+
+.theme-option:hover {
+  transform: scale(1.2);
+}
+
+.theme-option.active {
+  border-bottom: 2px solid #333;
+  transform: scale(1.2);
+}
+
 /*About CSS */
 
 .about-window {
-  flex: 1;
-  background: #D3E5E8;
-  padding: 20px;
-  display: none;
+  display: flex;
   flex-direction: column;
+  height: 100vh;
+  width: 100%;
+  background: #D3E5E8;
 }
 
 .about-header {
@@ -389,8 +418,8 @@ h3 {
 }
 
 .about-iframe {
+  flex: 1;
   width: 100%;
-  height: 100%;
   border: none;
 }
 
@@ -497,6 +526,7 @@ body[data-theme="dark"] .about-header h2 {
 body[data-theme="dark"] .send-btn,
 body[data-theme="dark"] .welcome-send-btn,
 body[data-theme="dark"] .new-chat-btn,
+body[data-theme="dark"] .history-item,
 body[data-theme="dark"] .export-btn,
 body[data-theme="dark"] .settings-header button,
 body[data-theme="dark"] .about-header button {

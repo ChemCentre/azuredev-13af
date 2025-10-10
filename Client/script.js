@@ -24,8 +24,8 @@ const settingsBtn = document.querySelector(".mini-icon[title='Settings']");
 const backToChat = document.getElementById("back-to-chat");
 
 const exportSelect = document.getElementById("config-export");
-const themeSelect = document.getElementById("config-theme");
-
+const themeToggleContainer = document.getElementById("config-theme");
+const themeButtons = themeToggleContainer.querySelectorAll(".theme-option");
 
 // State
 let chats = {};          // { chatId: [ { sender, text } ] }
@@ -126,7 +126,76 @@ function switchToChat() {
   normalInput.style.display = "flex";
 }
 
-// Handle welcome send
+document.getElementById('upload-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const fileInput = document.getElementById('welcome-file');
+  const messageInput = document.querySelector('.welcome-message-input');
+  const file = fileInput?.files?.[0] || null;
+  const message = messageInput?.value.trim() || "";
+
+  if (!file && !message) {
+    alert("Please enter a message or select a file.");
+    return;
+  }
+
+  // Show chat window and create chat
+  switchToChat();
+  if (!currentChatId) createChat();
+
+  // Show file and message in chat
+  if (file) addMessage(`📎 Uploaded: ${file.name}`, "user", true);
+  if (message) addMessage(message, "user", true);
+
+  // Prepare form data
+  const formData = new FormData();
+  if (file) formData.append('doc_file', file);
+  formData.append('message', message);
+
+  let uploadResult = null;
+
+  try {
+    const response = await fetch('/upload', {
+      method: 'POST',
+      body: formData
+    });
+
+    uploadResult = await response.text();
+    console.log("Upload result:", uploadResult);
+
+  } catch (error) {
+    console.error("Upload failed:", error);
+    uploadResult = "❌ Upload failed.";
+  }
+
+  // ✅ Always trigger AI response
+  const typingEl = showTypingIndicator();
+  setTimeout(() => {
+    typingEl.remove();
+    addMessage(
+      uploadResult?.includes("✅")
+        ? "🤖 Thanks! I've received your file and message."
+        : "🤖 I couldn't process the upload, but I'm here to help anyway.",
+      "ai",
+      true
+    );
+  }, 1200);
+
+  // Reset form
+  fileInput.value = "";
+  messageInput.value = "";
+});
+
+
+welcomeInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    document.getElementById("upload-form").requestSubmit();
+  }
+});
+
+/*
+ // Handle welcome send
 welcomeSendBtn.addEventListener("click", () => {
   const text = welcomeInput.value.trim();
   if (text === "") return;
@@ -153,7 +222,9 @@ welcomeInput.addEventListener("keydown", (e) => {
     e.preventDefault();
     welcomeSendBtn.click();
   }
-});
+}); 
+*/
+
 
 // ---- Normal chat handlers ----
 
@@ -251,7 +322,6 @@ backToChat.addEventListener("click", () => {
 
 // Load saved settings
 exportSelect.value = localStorage.getItem("exportFormat") || "csv";
-themeSelect.value = localStorage.getItem("theme") || "light";
 
 // Save on change
 exportSelect.addEventListener("change", () => {
@@ -261,27 +331,38 @@ exportSelect.addEventListener("change", () => {
 /*Applying the dark theme */
 
 window.addEventListener("DOMContentLoaded", () => {
-  function applyTheme(theme) {
-    document.body.setAttribute("data-theme", theme);
-
-    const iframe = document.querySelector(".about-iframe");
-    if (iframe && iframe.contentWindow) {
-      iframe.contentWindow.postMessage({ theme }, "*");
-    }
-  }
-
-  // Apply saved theme on page load
   const savedTheme = localStorage.getItem("theme") || "light";
   applyTheme(savedTheme);
-  themeSelect.value = savedTheme; // sync dropdown with current theme
 
-  // Update theme on change
-  themeSelect.addEventListener("change", () => {
-    const theme = themeSelect.value;
-    localStorage.setItem("theme", theme);
-    applyTheme(theme);
+  const iframe = document.querySelector(".about-iframe"); 
+
+  if (iframe) {
+    iframe.addEventListener("load", () => {
+      iframe.contentWindow.postMessage({ theme: savedTheme }, "*");
+    });
+  }
+
+  themeButtons.forEach(button => {
+    button.addEventListener("click", () => {
+      const selectedTheme = button.dataset.theme;
+      applyTheme(selectedTheme);
+
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage({ theme: selectedTheme }, "*");
+      }
+    });
   });
 });
+
+function applyTheme(theme) {
+  document.body.setAttribute("data-theme", theme);
+  localStorage.setItem("theme", theme);
+
+  themeButtons.forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.theme === theme);
+  });
+}
+
 
 //About js
 
