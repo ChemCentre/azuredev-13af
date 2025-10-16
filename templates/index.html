@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Agent Chat</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <div class="chat-container">
@@ -21,7 +21,7 @@
 
       <!-- Main Sidebar -->
       <div class="sidebar">
-        <img src="Images/PitPixie-logo.png" class="sidebar-logo" alt="PitPixie Logo">
+        <img src="{{ url_for('static', filename='Images/PitPixie-logo.png') }}" class="sidebar-logo" alt="PitPixie Logo">
         <button class="new-chat-btn">+ New Chat</button>
 
         <h3>Chat History</h3>
@@ -38,7 +38,7 @@
       <!-- Welcome screen (shown initially) -->
       <div class="welcome-screen">
         <h1>What are we mining today?</h1>
-        <form class="welcome-input" id="upload-form" method="POST" action="/upload" enctype="multipart/form-data">
+        <form class="welcome-input" id="upload-form" method="POST" enctype="multipart/form-data">
           <label for="welcome-file" class="upload-btn">+</label>
           <input type="file" id="welcome-file" name="doc_file" style="display: none;" />
           <textarea class="welcome-message-input" name="message" placeholder="Ask anything..."></textarea>
@@ -95,10 +95,10 @@
           <button id="back-to-chat-from-about">⬅ Back</button>
       </div>
 
-      <iframe src="about.html" class="about-iframe" style="width: 100%; height: 100%; border: none;"></iframe>
+      <iframe src="/about" class="about-iframe" style="width: 100%; height: 100%; border: none;"></iframe>
 
     </div>
   </div>
-  <script src="script.js"></script>
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

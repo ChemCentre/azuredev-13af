@@ -1,22 +1,20 @@
-import os
 from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
+import os
 
-#Load environment variables from .env file
 load_dotenv()
 
-# Get connection string and container from environment
-connect_str = os.getenv("AZURE_STORAGE_CONNECTION_STR")
-container_name = os.getenv("STORAGE_CONTAINER_NAME")
+ACCOUNT_NAME = os.getenv("AZURE_STORAGE_ACCOUNT")
+ACCOUNT_KEY = os.getenv("AZURE_STORAGE_KEY")
+CONTAINER_NAME = os.getenv("AZURE_STORAGE_CONTAINER")
 
-#Create BlobServiceClient
-blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+connection_string = f"DefaultEndpointsProtocol=https;AccountName={ACCOUNT_NAME};AccountKey={ACCOUNT_KEY};EndpointSuffix=core.windows.net"
+blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+container_client = blob_service_client.get_container_client(CONTAINER_NAME)
 
-#Upload doc to storage
-def upload_document(file):
-    try:
-        blob_client = blob_service_client.get_blob_client(container=container_name, blob=file.filename)
-        blob_client.upload_blob(file, overwrite=True)
-        return f"{file.filename} uploaded successfully to Azure Blob Storage."
-    except Exception as e:
-        return f"Error uploading file: {str(e)}"
+def upload_file_to_blob(file_path, blob_name):
+    """Uploads a file to Azure Blob Storage and returns the blob URL."""
+    with open(file_path, "rb") as data:
+        container_client.upload_blob(name=blob_name, data=data, overwrite=True)
+    blob_url = f"https://{ACCOUNT_NAME}.blob.core.windows.net/{CONTAINER_NAME}/{blob_name}"
+    return blob_url
