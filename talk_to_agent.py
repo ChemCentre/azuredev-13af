@@ -1,21 +1,23 @@
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents.models import ListSortOrder
+from load_secrets import get_secret
 from dotenv import load_dotenv
-import os
 
 load_dotenv()
 
-endpoint = os.getenv("AZURE_ENDPOINT")
-agent_id = os.getenv("AGENT_ID")
+# Retrieve endpoint and agent ID from Azure Key Vault
+endpoint = get_secret("azure-endpoint")
+agent_id = get_secret("agent-id")
 
-# Connect to project and agent
+# Connect securely to Azure AI Project
 project = AIProjectClient(
     credential=DefaultAzureCredential(),
     endpoint=endpoint
 )
-
+#Fetch the agent
 agent = project.agents.get_agent(agent_id)
+# Create a conversation thread
 thread  = project.agents.threads.create()
 
 # Send a message to the agent

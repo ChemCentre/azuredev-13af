@@ -1,12 +1,13 @@
 from azure.storage.blob import BlobServiceClient
+from load_secrets import get_secret
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
 
-ACCOUNT_NAME = os.getenv("AZURE_STORAGE_ACCOUNT")
-ACCOUNT_KEY = os.getenv("AZURE_STORAGE_KEY")
-CONTAINER_NAME = os.getenv("AZURE_STORAGE_CONTAINER")
+ACCOUNT_NAME = get_secret("azure-storage-account")
+ACCOUNT_KEY = get_secret("azure-storage-key")
+CONTAINER_NAME = get_secret("azure-storage-container")
 
 connection_string = f"DefaultEndpointsProtocol=https;AccountName={ACCOUNT_NAME};AccountKey={ACCOUNT_KEY};EndpointSuffix=core.windows.net"
 blob_service_client = BlobServiceClient.from_connection_string(connection_string)
