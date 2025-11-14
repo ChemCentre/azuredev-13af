@@ -1,0 +1,28 @@
+Traceback (most recent call last):
+  File "C:\Users\vperera\.vscode\azuredev-13af\app.py", line 85, in <module>
+    agent = project.agents.get_agent(AGENT_ID)
+  File "C:\Users\vperera\.vscode\azuredev-13af\venv\Lib\site-packages\azure\core\tracing\decorator.py", line 119, in wrapper_use_tracer
+    return func(*args, **kwargs)
+  File "C:\Users\vperera\.vscode\azuredev-13af\venv\Lib\site-packages\azure\ai\agents\operations\_operations.py", line 5461, in get_agent
+    map_error(status_code=response.status_code, response=response, error_map=error_map)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\vperera\.vscode\azuredev-13af\venv\Lib\site-packages\azure\core\exceptions.py", line 163, in map_error
+    raise error
+azure.core.exceptions.ResourceNotFoundError: (404) Resource not found
+Code: 404
+Message: Resource not found
+
+Traceback (most recent call last):
+  File "C:\Users\vperera\.vscode\azuredev-13af\app.py", line 85, in <module>
+    agent = project.agents.get_agent(AGENT_ID)
+  File "C:\Users\vperera\.vscode\azuredev-13af\venv\Lib\site-packages\azure\core\tracing\decorator.py", line 119, in wrapper_use_tracer
+    return func(*args, **kwargs)
+  File "C:\Users\vperera\.vscode\azuredev-13af\venv\Lib\site-packages\azure\ai\agents\operations\_operations.py", line 5461, in get_agent
+    map_error(status_code=response.status_code, response=response, error_map=error_map)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\vperera\.vscode\azuredev-13af\venv\Lib\site-packages\azure\core\exceptions.py", line 163, in map_error
+    raise error
+azure.core.exceptions.ResourceNotFoundError: (404) Resource not found
+Code: 404
+Message: Resource not found
+

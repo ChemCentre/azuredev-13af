@@ -17,8 +17,13 @@ project = AIProjectClient(
 )
 #Fetch the agent
 agent = project.agents.get_agent(agent_id)
-# Create a conversation thread
+
+#Create a conversation thread
 thread  = project.agents.threads.create()
+
+# Use the thread ID from session
+#thread_id = session["thread_id"]
+#print(f"[DEBUG] Using thread ID: {thread_id}")
 
 # Send a message to the agent
 message = project.agents.messages.create(
