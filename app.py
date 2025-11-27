@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, render_template, session
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents.models import ListSortOrder
+from openai import AzureOpenAI
 from storage import upload_file_to_blob
 from load_secrets import get_secret
 from dotenv import load_dotenv
@@ -22,6 +23,10 @@ SEARCH_ENDPOINT = get_secret("azure-search-endpoint")
 SEARCH_INDEX = get_secret("azure-search-index")
 SEARCH_KEY = get_secret("azure-search-key")
 FLASK_SECRET_KEY = get_secret("flask-secret-key")
+EMBED_ENDPOINT = get_secret("embedding-endpoint")
+EMBED_KEY = get_secret("embedding-key")
+EMBED_DEPLOYMENT = get_secret("embedding-deployment")
+API_VERSION = "2023-05-15"
 
 # ---------------------------------------------------------------------
 # Flask setup
@@ -34,7 +39,11 @@ app.secret_key = FLASK_SECRET_KEY
 # ---------------------------------------------------------------------
 project = AIProjectClient(credential=DefaultAzureCredential(), endpoint=ENDPOINT)
 agent = project.agents.get_agent(AGENT_ID)
-
+embedding_client = AzureOpenAI(
+    api_version=API_VERSION,
+    azure_endpoint = EMBED_ENDPOINT,
+    api_key=EMBED_KEY
+)
 LAST_CONTEXT = {}
 
 # ---------------------------------------------------------------------
@@ -80,6 +89,18 @@ def clear_active_prefix():
         print(f"[DEBUG] Cleared active prefix: {session['active_prefix']}")
         del session["active_prefix"]
 
+def embed_query(text):
+    """Generate embeddings for the user query using Azure AI Foundry."""
+    try:
+        response = embedding_client.embeddings.create(
+            model=EMBED_DEPLOYMENT,
+            input=text
+        )
+        return response.data[0].embedding
+    except Exception as e:
+        print("[ERROR] Embedding generation failed:", e)
+        return None
+
 # ---------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------
@@ -123,7 +144,7 @@ def upload_file():
         )
 
         # Trigger indexer
-        indexer_name = "mcpdocument-search-indexer"
+        indexer_name = "mcpdocument-rag-search-indexer"
         indexer_url = f"{SEARCH_ENDPOINT}/indexers/{indexer_name}/run?api-version=2021-04-30-Preview"
         headers = {"api-key": SEARCH_KEY}
         resp = requests.post(indexer_url, headers=headers)
@@ -142,12 +163,15 @@ def upload_file():
 # ---------------------------------------------------------------------
 def query_azure_search(query, thread_id):
     try:
-        url = f"{SEARCH_ENDPOINT}/indexes/{SEARCH_INDEX}/docs/search?api-version=2021-04-30-Preview"
-        headers = {"Content-Type": "application/json", "api-key": SEARCH_KEY}
 
-        prefix_match = None
-        titles_data = []
-        known_prefixes = []
+        #Generate embedding for user query
+        vector = embed_query(query)
+        if vector is None:
+            print("[ERROR] Query embedding failed.")
+            return ""
+
+        url = f"{SEARCH_ENDPOINT}/indexes/{SEARCH_INDEX}/docs/search?api-version=2024-07-01"
+        headers = {"Content-Type": "application/json", "api-key": SEARCH_KEY}
 
         # -------------------------------------------------------------
         # Fetch document titles dynamically
@@ -155,161 +179,109 @@ def query_azure_search(query, thread_id):
         try:
             titles_url = (
                 f"{SEARCH_ENDPOINT}/indexes/{SEARCH_INDEX}/docs"
-                "?api-version=2021-04-30-Preview&$select=title&$top=50"
+                "?api-version=2023-07-01-Preview&$select=title,parent_id&$top=2000"
             )
             titles_response = requests.get(titles_url, headers=headers)
+            #print(json.dumps(titles_response.json(), indent=2))
             titles_response.raise_for_status()
-            titles_data = [d["title"] for d in titles_response.json().get("value", [])]
-            known_prefixes = [t.split()[0].lower() for t in titles_data if t]
-            print(f"[DEBUG] Indexed document prefixes: {known_prefixes}")
+            title_docs = titles_response.json().get("value", [])
 
-            # Detect prefix match from the user query
-            for prefix in known_prefixes:
-                if re.search(rf"\b{re.escape(prefix)}\b", query.lower()):
-                    prefix_match = prefix
-                    break
+            titles = [d["title"] for d in title_docs]
+            parents = {d["title"]: d.get("parent_id") for d in title_docs}
 
-            active_prefix = get_active_prefix()
-            if prefix_match and prefix_match != active_prefix:
-                print(f"[DEBUG] Switching document context (old: {active_prefix}, new: {prefix_match})")
-                set_active_prefix(prefix_match)
-            elif any(x in query.lower() for x in ["all documents", "every document", "all files"]):
-                clear_active_prefix()
-                print("[DEBUG] User requested search across all documents.")
-            elif not prefix_match:
-                prefix_match = get_active_prefix()
-                if prefix_match:
-                    print(f"[DEBUG] Reusing active prefix: {prefix_match}")
-                else:
-                    print("[DEBUG] No active prefix; searching all documents.")
-
+            known_prefixes = [t.split()[0].lower() for t in titles if t]
+            #print(f"[DEBUG] Indexed document prefixes: {known_prefixes}")
+        
         except Exception as e:
             print("[DEBUG] Title fetch error:", e)
+            prefix_match = None
 
-        # -------------------------------------------------------------
-        # A1 behaviour: if a specific document is active, load FULL doc
-        # -------------------------------------------------------------
-        if prefix_match:
-            match_title = next(
-                (t for t in titles_data if t.lower().startswith(prefix_match.lower())),
-                None,
-            )
-            if match_title:
-                escaped_title = match_title.replace("'", "''")
-                full_doc_payload = {
-                    "search": "*",
-                    "queryType": "simple",
-                    "select": "chunk,title,merged_content",
-                    "top": 5000,
-                    "searchMode": "all",
-                    "filter": f"title eq '{escaped_title}'",
-                }
-                print(f"[DEBUG] Filtering to: {match_title}")
+            # Detect prefix match from the user query
+        prefix_match = None
+        for prefix in known_prefixes:
+            if prefix in query.lower():
+                prefix_match = prefix
+                break
 
-                response = requests.post(url, headers=headers, json=full_doc_payload)
-                if response.status_code != 200:
-                    print("Azure Search error:", response.text)
-                    response.raise_for_status()
-                data = response.json()
+        active_prefix = get_active_prefix()
 
-                all_chunks = []
-                MAX_DOC_CHARS = 60000
-                for doc in data.get("value", []):
-                    title = doc.get("title", "")
-                    raw = doc.get("chunk") or doc.get("merged_content") or ""
-                    content = str(raw)
-
-                    if len(content) > MAX_DOC_CHARS:
-                        content = content[:MAX_DOC_CHARS] + "\n...[TRUNCATED]..."
-
-                    all_chunks.append(f"{title}\n{content}")
-
-                merged_context = "\n\n".join(all_chunks)
-                print(f"[DEBUG] Retrieved {len(all_chunks)} chunks for query: '{query}'")
-                print(f"[DEBUG] Total context length: {len(merged_context)}")
-
-                if not merged_context.strip():
-                    return "No relevant documents found."
-
-                return merged_context
+        if prefix_match and prefix_match != active_prefix:
+            print(f"[DEBUG] Switching document context (old: {active_prefix}, new: {prefix_match})")
+            set_active_prefix(prefix_match)
+        elif any(x in query.lower() for x in ["all documents", "every document", "all files"]):
+            clear_active_prefix()
+            print("[DEBUG] User requested search across all documents.")
+        elif not prefix_match:
+            prefix_match = get_active_prefix()
+            if prefix_match:
+                print(f"[DEBUG] Reusing active prefix: {prefix_match}")
             else:
-                print("[DEBUG] Prefix matched but no matching title found; searching all documents.")
+                print("[DEBUG] No active prefix; searching all documents.")
+
+
 
         # -------------------------------------------------------------
-        # If no specific doc, run semantic search with fallback
-        # (the behaviour you had before, across ALL documents)
+        # AI behaviour: if a specific document is active, load FULL doc
         # -------------------------------------------------------------
-        subqueries = [
-            q.strip()
-            for q in re.split(r"\band\b|&|;|,|then|also", query, flags=re.IGNORECASE)
-            if q.strip()
-        ]
-
-        all_chunks = []
-        MAX_DOC_CHARS = 60000
-
-        for subquery in subqueries:
-            payload = {
-                "search": subquery,
-                "queryType": "semantic",
-                "semanticConfiguration": "mcpdocument-search-semantic-configuration",
-                "queryLanguage": "en-us",
-                "captions": "extractive|highlight-false",
-                "answers": "extractive|count-3",
-                "select": "chunk,title,merged_content",   # VALID FIELDS ONLY
-                "top": 10,
-                "count": True,
-                "searchMode": "all",
-                "speller": "lexicon"
-            }
-
-            # Run semantic search
-            response = requests.post(url, headers=headers, json=payload)
-            if response.status_code != 200:
-                print("Azure Search error:", response.text)
-                response.raise_for_status()
-            data = response.json()
-
-            total_matches = len(data.get("value", []))
-            print(f"[DEBUG] Azure Search returned {total_matches} results for subquery: '{subquery}'")
-
-            # Fallback to keyword search
-            if not data.get("value"):
-                print("[DEBUG] No semantic results; falling back to keyword search...")
-
-                fallback_payload = {
-                    "search": subquery,
-                    "top": 10,
-                    "searchMode": "all",
-                    "select": "chunk,title,merged_content",
-                    "queryType": "simple",
+        filter_condition = None
+        if prefix_match:
+            for t in titles:
+                if t.lower().startswith(prefix_match):
+                    parent_id = parents.get(t)
+                    if parent_id:
+                        filter_condition = f"parent_id eq '{parent_id}'"
+                    break
+        
+        payload = {
+            "search": query,
+            "queryType": "semantic",
+            "semanticConfiguration": "mcpdocument-rag-search-semantic-configuration",
+            "select": "chunk,title,parent_id",
+            "top": 12,
+            "vectorQueries": [
+                {
+                    "kind": "vector",
+                    "fields": "text_vector",
+                    "k": 25,
+                    "vector": vector
                 }
+            ]
+        }
 
-                fallback_resp = requests.post(url, headers=headers, json=fallback_payload)
-                fallback_resp.raise_for_status()
-                data = fallback_resp.json()
+        if filter_condition:
+            payload["filter"] = filter_condition
+            print(f"[DEBUG] Using filter: {filter_condition}")
+        
+        url = f"{SEARCH_ENDPOINT}/indexes/{SEARCH_INDEX}/docs/search?api-version=2024-07-01"
+        resp = requests.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        results = resp.json().get("value", [])
 
-            # Parse and merge chunks
-            for doc in data.get("value", []):
-                title = doc.get("title", "")
-                raw = doc.get("chunk") or doc.get("merged_content") or ""
-                content = str(raw)
+        print(f"[DEBUG] Retrieved {len(results)} chunks from vector search.")
 
-                if len(content) > MAX_DOC_CHARS:
-                    content = content[:MAX_DOC_CHARS] + "\n...[TRUNCATED]..."
+        if not results:
+            return ""
+        
+        context_parts = []
+        for r in results:
+            title = r.get("title", "")
+            chunk = r.get("chunk", "")
+            context_parts.append(f"{title}\n{chunk}")
+            
+        full_context = "\n\n".join(context_parts)
 
-                all_chunks.append(f"{title}\n{content}")
-
-        merged_context = "\n\n".join(all_chunks)
-        print(f"[DEBUG] Total context length: {len(merged_context)}")
-
-        if not merged_context.strip():
-            return "No relevant documents found."
-
-        return merged_context
-
+        if len(full_context) > 180000:
+            full_context = full_context[:180000] + "\n\n...[TRUNCATED]..."
+            
+        return full_context
+    
     except Exception as e:
         print("Azure Search error:", e)
+        print("status:", resp.status_code)
+        print("url", url)
+        print("payload sent:", json.dumps(payload, indent=2))
+        print("Response:", resp.text)
+        resp.raise_for_status
         return ""
 
 # ---------------------------------------------------------------------
@@ -353,7 +325,7 @@ QUESTION:
         )
 
         if run.status == "failed":
-            return jsonify({"response": f"❌ AI agent failed: {run.last_error}"})
+            return jsonify({"response": f" AI agent failed: {run.last_error}"})
 
         # Get response
         messages = list(project.agents.messages.list(
