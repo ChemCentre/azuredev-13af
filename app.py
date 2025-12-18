@@ -1,15 +1,18 @@
-from flask import Flask, request, jsonify, render_template, session
+from flask import Flask, request, jsonify, render_template, session, redirect
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents.models import ListSortOrder
+from azure.storage.blob import BlobServiceClient
 from openai import AzureOpenAI
-from storage import upload_file_to_blob
+from storage import upload_file_to_blob, save_chat_message,load_chat_history,create_chat_id,load_chat_list,save_chat_list,save_chat_prefix
 from load_secrets import get_secret
 from dotenv import load_dotenv
 import tempfile
 import requests
+import uuid
 import time
 import json
+import os
 import re
 
 load_dotenv()
@@ -27,6 +30,11 @@ EMBED_ENDPOINT = get_secret("embedding-endpoint")
 EMBED_KEY = get_secret("embedding-key")
 EMBED_DEPLOYMENT = get_secret("embedding-deployment")
 API_VERSION = "2023-05-15"
+
+#LOGIN_USERNAME = get_secret("login-username")
+#LOGIN_PASSWORD = get_secret("login-password")
+LOGIN_USERNAME = "admin"
+LOGIN_PASSWORD = "admin123"
 
 # ---------------------------------------------------------------------
 # Flask setup
@@ -69,9 +77,11 @@ def reset_user_thread():
             project.agents.threads.delete(session["thread_id"])
         except Exception:
             pass
-    session.clear()  # Clear entire session
+
+    #session.clear()  # Clear entire session
     session["thread_id"] = create_clean_thread()
     session["is_new_chat"] = True
+    session.pop("active_prefix", None)
     print(f"[DEBUG] Reset thread for new chat: {session['thread_id']}")
 
 def get_active_prefix():
@@ -100,23 +110,114 @@ def embed_query(text):
     except Exception as e:
         print("[ERROR] Embedding generation failed:", e)
         return None
+    
+""" def get_chat_id():
+    if "chat_id" not in session:
+        session["chat_id"] = create_chat_id()
+    return session["chat_id"] """
+
+def get_chat_id():
+    """
+    Returns the current chat id for this session.
+    If none yet, creates one and ensures it's in the global chat list.
+    """
+    chat_id = session.get("chat_id")
+    if not chat_id:
+        chat_id = create_chat_id()
+        session["chat_id"] = chat_id
+
+        # Ensure chat list contains this chat
+        chat_list = load_chat_list()
+        if chat_id not in chat_list:
+            chat_list.insert(0, chat_id)  # newest first
+            save_chat_list(chat_list)
+
+        print(f"[CHAT] New chat_id created and saved: {chat_id}")
+    return chat_id
+
+
+#---------------------------------------------------------------------
+# Authentication decorator
+#---------------------------------------------------------------------
+
+def login_required(route_function):
+    def wrapper(*args, **kwargs):
+        if not session.get("authenticated"):
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return jsonify({"error": "Authentication required"}), 401
+            return redirect("/login")
+        return route_function(*args, **kwargs)
+    wrapper.__name__ = route_function.__name__
+    return wrapper
+
+#---------------------------------------------------------------------
+# Login route
+#---------------------------------------------------------------------
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """Render login page and handle authentication."""
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        if username == LOGIN_USERNAME and password == LOGIN_PASSWORD:
+            session["authenticated"] = True
+            return redirect("/")
+        else:
+            return render_template("login.html", error="Invalid credentials. Please try again.")
+    return render_template("login.html")
+
+@app.route("/logout")
+def logout():
+    """Log out the user by clearing the session."""
+    session.clear()
+    return redirect("/login")
 
 # ---------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------
 @app.route("/")
+@login_required
 def home():
     # Start fresh every time someone visits the home page
-    reset_user_thread()
+    if "thread_id" not in session:
+        session["thread_id"] = create_clean_thread()
+        #reset_user_thread()
+    #chat_history = load_chat_history(get_chat_id())
     return render_template("index.html")
+    #return render_template("index.html")
 
 @app.route("/new_chat", methods=["POST"])
+@login_required
 def new_chat():
     """Explicit new chat endpoint."""
     reset_user_thread()
-    return jsonify({"status": "New chat started"})
+    session.pop("active_prefix", None)
+    chat_id = create_chat_id()
+
+    chat_list = load_chat_list()
+    chat_list.append(chat_id)
+    save_chat_list(chat_list)
+
+    #session.pop("chat_id", None)  # Clear chat ID for new chat
+    return jsonify({"status": "New chat started", "chat_id": chat_id})
+
+@app.route("/get_chat_list", methods=["GET"])
+@login_required
+def list_chats():
+    """Endpoint to list all chats."""
+    chat_list = load_chat_list()
+    return jsonify([{"chat_id": cid} for cid in chat_list])
+
+@app.route("/chat/<chat_id>", methods=["GET"])
+@login_required
+def get_chat(chat_id):
+     """Endpoint to load a specific chat by ID."""
+     chat_history = load_chat_history(chat_id)
+     return jsonify({"chat_history": chat_history})
 
 @app.route("/about")
+@login_required
 def about():
     return render_template("about.html")
 
@@ -124,11 +225,16 @@ def about():
 # File Upload Endpoint
 # ---------------------------------------------------------------------
 @app.route("/upload_file", methods=["POST"])
+@login_required
 def upload_file():
     thread_id = get_user_thread()
     file = request.files.get("doc_file")
+    chat_id = request.form.get("chat_id")
     if not file:
         return jsonify({"response": "No file received."}), 400
+
+    if not chat_id:
+        chat_id = get_chat_id()
 
     try:
         # save temporarily and upload to blob
@@ -161,7 +267,7 @@ def upload_file():
 # ---------------------------------------------------------------------
 # Azure Cognitive Search Query
 # ---------------------------------------------------------------------
-def query_azure_search(query, thread_id):
+def query_azure_search(query, thread_id, chat_id):
     try:
 
         #Generate embedding for user query
@@ -208,9 +314,24 @@ def query_azure_search(query, thread_id):
         if prefix_match and prefix_match != active_prefix:
             print(f"[DEBUG] Switching document context (old: {active_prefix}, new: {prefix_match})")
             set_active_prefix(prefix_match)
+
+            try:
+                save_chat_prefix(chat_id, prefix_match)
+                print(f"[DEBUG] Saved chat prefix: {prefix_match} for chat: {chat_id}")
+            except Exception as e:
+                print("Failed to save chat prefix error:", e)
+
         elif any(x in query.lower() for x in ["all documents", "every document", "all files"]):
             clear_active_prefix()
+
+            try:
+                save_chat_prefix(chat_id, None)
+                print(f"[DEBUG] Cleared chat prefix for chat: {chat_id}")
+            except Exception as e:
+                print("Failed to clear chat prefix error:", e)
+
             print("[DEBUG] User requested search across all documents.")
+
         elif not prefix_match:
             prefix_match = get_active_prefix()
             if prefix_match:
@@ -288,16 +409,34 @@ def query_azure_search(query, thread_id):
 # Chat Endpoint - FIXED: Use consistent thread, not reset every message
 # ---------------------------------------------------------------------
 @app.route("/send_message", methods=["POST"])
+@login_required
 def send_message():
     user_message = request.json.get("message", "").strip()
+
     if not user_message:
         return jsonify({"response": "No message provided."})
+    
+    chat_id = request.json.get("chat_id")
+
+    if not chat_id:
+        chat_id = get_chat_id()
+
+    chat_list = load_chat_list()
+    if chat_id not in chat_list:
+        chat_list.insert(0, chat_id)
+        save_chat_list(chat_list)
+
+    try:
+        save_chat_message(chat_id, "user", user_message)
+    except Exception as e:   
+        print("Failed to save chat message error:", e)
 
     try:
         # Use the same thread for the session - don't reset every message!
         thread_id = get_user_thread()
 
-        context = query_azure_search(user_message, thread_id)
+        context = query_azure_search(user_message, thread_id, chat_id)
+
         if not context or not context.strip():
             return jsonify({"response": "No relevant information found in the provided documents."})
 
@@ -339,11 +478,110 @@ QUESTION:
                 ai_response = msg.text_messages[-1].text.value
                 break
         
+        # Save chat to blob history
+        try:
+            save_chat_message(chat_id, "assistant", ai_response)
+        except Exception as e:   
+            print("Failed to save AI chat message error:", e)
+        
         return jsonify({"response": ai_response or "No response received."})
 
     except Exception as e:
         print("Agent error:", e)
         return jsonify({"response": f"Error: {str(e)}"})
+
+@app.route("/get_chat_history", methods=["GET"])
+@login_required
+def get_chat_history():
+    """Endpoint to retrieve chat history."""
+    chat_id = request.args.get("chat_id") #or get_chat_id()
+    if not chat_id:
+        return jsonify({"chat_history": []})
+    try:
+        chat_history = load_chat_history(chat_id)
+        # Restore prefix
+        prefix = load_chat_history("chat_id")
+        session["active_prefix"] = prefix
+
+        return jsonify({
+            "chat_history": chat_history,
+            "active_prefix": prefix
+            })
+    except Exception as e:
+        print("Failed to load chat history error:", e)
+        return jsonify({"chat_history": []})
+
+@app.route("/delete_chat", methods=["DELETE"])
+@login_required
+def delete_chat():
+
+    chat_id = request.args.get("chat_id")
+    if not chat_id:
+        return jsonify({"error": "No chat_id provided."}), 400
+
+    print(f"[DELETE] Deleting chat_id: {chat_id}")   
+
+    # Delete chat history blob
+    try:
+        from storage import chat_container_client
+        blob_name = f"{chat_id}.json"
+        blob_client = chat_container_client.get_blob_client(blob_name)
+
+        if blob_client.exists():
+            blob_client.delete_blob()
+            print(f"[DELETE] Deleted blob file: {blob_name}") 
+        else:
+            print(f"[DELETE] Blob file not found: {blob_name}")
+    
+    except Exception as e:
+        print("Failed to delete chat blob error:", e)
+        return jsonify({"error": f"Failed to delete chat file"}), 500
+    
+    # Remove from chat list
+    try:
+        chat_list = load_chat_list()
+
+        if chat_id in chat_list:
+            chat_list.remove(chat_id)
+            save_chat_list(chat_list)
+            print(f"[DELETE] Removed chat_id from chat list: {chat_id}")
+        else:
+            print(f"[DELETE] chat_id not found in chat list: {chat_id}")
+
+    except Exception as e:
+        print("Failed to update chat list error:", e)
+        return jsonify({"error": "Failed to update chat list"}), 500
+    
+    if session.get("chat_id") == chat_id:
+        session.pop("chat_id", None)
+        print(f"[DELETE] Cleared chat_id from session: {chat_id}")
+    
+    return jsonify({"status": "Chat deleted successfully."})
+
+@app.route("/get_documents", methods=["GET"])
+@login_required
+def get_documents():
+    """Return list of documents for filtering."""
+    try:
+        headers = {"Content-Type": "application/json", "api-key": SEARCH_KEY}
+        url = (f"{SEARCH_ENDPOINT}/indexes/{SEARCH_INDEX}/docs""?api-version=2023-07-01-Preview&$select=title,parent_id&$top=2000" )
+        resp = requests.get(url, headers=headers)
+        resp.raise_for_status() 
+        docs = resp.json().get("value", [])
+
+        seen = {}
+        for d in docs:
+            pid = d.get("parent_id")
+            title = d.get("title")
+            if pid and title and pid not in seen:
+                seen[pid] = {
+                    "parent_id": pid,
+                    "title": title
+                }
+        return jsonify({"documents": list(seen.values())})
+    except Exception as e:
+        print("Failed to retrieve documents error:", e)
+        return jsonify({"documents": []})
 
 # ---------------------------------------------------------------------
 if __name__ == "__main__":

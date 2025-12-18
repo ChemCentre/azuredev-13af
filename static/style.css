@@ -563,3 +563,234 @@ select,
 button {
   transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
+
+.login-container {
+    width: 350px;
+    height: 400px; 
+    margin: 120px auto;
+    padding: 30px;
+    background: #afd2d8;
+    border-radius: 12px;
+    box-shadow: 0 2px 20px rgba(0,0,0,0.1);
+    text-align: center;
+}
+
+.login-container input {
+    width: 100%;
+    padding: 12px;
+    margin: 25px 0;
+    border-radius: 8px;
+    border: 1px solid #D3E5E8;
+}
+
+.login-btn {
+    width: 100%;
+    padding: 12px;
+    margin: 30px 0;
+    background: #0078ff;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.error {
+    color: red;
+    margin-top: 10px;
+}
+
+/* ========================================================================= */
+/* Chat History Item + Three-Dot Menu                                        */
+/* ========================================================================= */
+
+/* Wrapper for history item + menu icon */
+.history-item-wrapper {
+  position: relative;
+  width: 85%;
+  margin: 0 auto 10px auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #2C7C89;
+  /*border: 1px solid #aaa;*/
+  border-radius: 10px;
+  padding: 0;
+  overflow: visible;
+  transition: background 0.2s;
+}
+
+.history-item-wrapper:hover {
+  background: #3498a0;
+}
+/* Main chat title button */
+.history-item-wrapper .history-item {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #fff;
+  text-align: left;
+  padding: 12px 14px;
+  cursor: pointer;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-item-wrapper .history-item:hover {
+  background: #3498a0;
+  border-radius: 8px 0 0 8px;
+}
+
+/* Active chat highlight */
+.history-item-wrapper.active .history-item.active .history-item-wrapper {
+  background: #ffc107;
+  color: #000;
+  border-color: #e0ae00;
+}
+
+/* Three-dot menu button */
+.history-item-options {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 10px 14px;
+
+  border-left: 1px solid rgba(255,255,255,0.25);
+  border-radius: 0 10px 10px 0;
+  transition: background 0.2s;
+}
+
+.history-item-options:hover {
+  background: rgba(255,255,255,0.18);
+}
+
+/* Dropdown menu */
+.history-item-menu {
+  position: absolute;
+  right: 0;
+  top: 46px;
+  min-width: 160px;
+
+  background: #185763;   /* matches your sidebar colour */
+  border: 1px solid #aaa;
+  border-radius: 8px;
+  padding: 6px 0;
+  display: none;
+  z-index: 1000;
+
+  box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+}
+
+/* Show menu */
+.history-item-menu.show {
+  display: block;
+}
+
+/* Menu option buttons */
+.history-item-menu button {
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  color: #D3E5E8;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.history-item-menu button:hover {
+  background: #3498a0;
+  color: white;
+}
+
+/* ========================================================================= */
+/* Dark theme compatibility                                                  */
+/* ========================================================================= */
+
+body[data-theme="dark"] .history-item-wrapper {
+  background: #283757;
+  border-color: #666;
+}
+
+body[data-theme="dark"] .history-item-options {
+  border-color: #555;
+}
+
+body[data-theme="dark"] .history-item-menu {
+  background: #0f2f35;
+  border-color: #666;
+}
+
+body[data-theme="dark"] .history-item-menu button {
+  color: #eee;
+}
+
+body[data-theme="dark"] .history-item-menu button:hover {
+  background: #1b3c47;
+}
+
+/* ========================================================================= */
+/* Filter Sidebar                                                          */   
+/* ========================================================================= */
+
+.filter-sidebar
+{
+  width: 280px;
+  background: #185763;
+  color: #D3E5E8;
+  display: flex;
+  flex-direction: column;
+  padding: 15px;
+  border-left: 1px solid #aaa;
+}
+
+.filter-header 
+{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.filter-header h3 
+{
+  font-size: 18px;
+}
+
+.filter-header button
+{
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.filter-content 
+{
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.filter-doc-item 
+{
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  cursor: pointer;
+}
+
+.filter-doc-item input 
+{
+  transform: scale(1.2);
+}
+
+.filter-doc-item span 
+{
+  font-size: 14px;
+}

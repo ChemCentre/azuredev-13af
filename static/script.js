@@ -39,6 +39,11 @@ const exportBtn    = document.querySelector(".export-btn");
 const exportSelect = document.getElementById("config-export");
 const themeButtons = document.querySelectorAll("#config-theme .theme-option");
 
+const filterBtn    = document.querySelector(".mini-icon[title='Filter']");
+const filterSiderbar = document.getElementById("filter-sidebar");
+const closeFilterBtn = document.getElementById("close-filter")
+const filterContent = document.querySelector(".filter-content");
+
 // ------------------- STATE -------------------
 let chats = {};                // { chatId: [ { sender, text } ] }
 let currentChatId = null;
@@ -73,7 +78,7 @@ function addMessage(text, sender, save = true) {
   chatMessages.scrollTop = chatMessages.scrollHeight;
 
   if (save) {
-    if (!currentChatId) createChat();
+    if (!currentChatId) return;
     chats[currentChatId].push({ sender, text });
     updateHistoryPreview(currentChatId, text);
   }
@@ -122,9 +127,68 @@ function renderChat(chatId) {
 function updateHistoryPreview(chatId, lastText) {
   const btn = chatHistoryContainer.querySelector(`[data-chat-id="${chatId}"]`);
   if (!btn) return;
-  const base = btn.textContent.split(" — ")[0];
-  const short = lastText.length > 30 ? `${lastText.slice(0,30)}…` : lastText;
-  btn.textContent = `${base} — ${short}`;
+
+  const preview = lastText.length > 30 ? `${lastText.slice(0,30)}…` : lastText;
+  btn.textContent = `Chat ${chatId.slice(0,8)} - ${preview}`;
+}
+
+function createHistoryItem(chatId) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "history-item-wrapper";
+
+  const btn = document.createElement("button");
+  btn.textContent = `Chat ${chatId.slice(0,8)}`;
+  btn.dataset.chatId = chatId;
+  btn.className = "history-item";
+
+  btn.addEventListener("click", async () => {
+    await loadChat(chatId);
+    switchToChat();
+  });
+
+  const optionsBtn = document.createElement("button");
+  optionsBtn.className = "history-item-options";
+  optionsBtn.innerHTML = "...";
+
+  const menu = document.createElement("div");
+  menu.className = "history-item-menu";
+
+  const delBtn = document.createElement("button");
+  delBtn.textContent = "Delete Chat";
+  
+  delBtn.addEventListener("click", async () => {
+    const ok = confirm("Delete this chat permanently?");
+    if (!ok) return;
+
+    await fetch(`/delete_chat?chat_id=${chatId}`, {
+      method: "DELETE",
+      credentials: "include"
+    });
+
+    wrapper.remove();
+
+    if (currentChatId === chatId) {
+      chatMessages.innerHTML = "";
+      currentChatId = null;
+    }
+
+    menu.classList.remove("show");
+
+  });
+
+  menu.appendChild(delBtn);
+
+  optionsBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.classList.toggle("show");
+  });
+
+  document.addEventListener("click", () => menu.classList.remove("show"));
+
+  wrapper.appendChild(btn);
+  wrapper.appendChild(optionsBtn);
+  wrapper.appendChild(menu);
+  return wrapper;
 }
 
 // ============================================================================
@@ -142,8 +206,15 @@ async function sendToAgent(userText) {
   try {
     const res = await fetch("/send_message", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: userText })
+      headers: { 
+        "Content-Type": "application/json", 
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      credentials:"include",
+      body: JSON.stringify({ 
+        message: userText,
+        chat_id: currentChatId 
+      })
     });
     const data = await res.json();
     typingEl.remove();
@@ -160,14 +231,22 @@ async function uploadFile(file) {
 
   const formData = new FormData();
   formData.append("doc_file", file);
+  formData.append("chat_id", currentChatId);
 
   const typingEl = showTyping();
+
   try {
-    const res = await fetch("/upload_file", { method: "POST", body: formData });
+    const res = await fetch("/upload_file", 
+      { method: "POST", 
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+        credentials:"include",
+        body: formData });
+
     const data = await res.json();
     typingEl.remove();
     addMessage(data.response || "✅ File uploaded.", "ai");
     return { ok: true, data };
+    
   } catch (err) {
     typingEl.remove();
     addMessage("❌ Upload failed.", "ai");
@@ -277,7 +356,35 @@ toggleBtn.addEventListener("click", () => {
   toggleBtn.textContent = sidebar.classList.contains("collapsed") ? "➡️" : "⬅️";
 });
 
-newChatBtn.addEventListener("click", () => createChat());
+
+newChatBtn.addEventListener("click", async () => {
+  const res = await fetch("/new_chat", {
+    method: "POST",
+    credentials: "include"
+});
+
+  const data = await res.json();
+  const chatId = data.chat_id || data.chatId;
+
+/*   const btn = document.createElement("button");
+  btn.className = "history-item";
+  btn.textContent = `Chat ${chatId.slice(0,8)}`;
+  btn.dataset.chatId = chatId; */
+
+/*   btn.addEventListener("click",async () => {
+    await loadChat(chatId);
+    switchToChat();
+  });
+ */
+  const item = createHistoryItem(chatId);
+  chatHistoryContainer.prepend(item);
+
+  chats[chatId] = [];
+  currentChatId = chatId;
+  chatMessages.innerHTML = "";
+  switchToChat();
+
+});
 
 // Export chat to CSV
 exportBtn.addEventListener("click", () => {
@@ -303,6 +410,15 @@ exportBtn.addEventListener("click", () => {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+});
+
+filterBtn.addEventListener("click", () => {
+  filterSiderbar.style.display = "flex";
+  loadFilterDocuments();
+});
+
+closeFilterBtn.addEventListener("click", () => {
+  filterSiderbar.style.display = "none";
 });
 
 // ============================================================================
@@ -365,3 +481,103 @@ function applyTheme(theme) {
   localStorage.setItem("theme", theme);
   themeButtons.forEach(btn => btn.classList.toggle("active", btn.dataset.theme === theme));
 }
+
+window.addEventListener("DOMContentLoaded", async () => {
+  // Load chat history from server
+  const res = await fetch("/get_chat_list", {
+    method: "GET",
+    credentials: "include"
+  });
+
+  const chatList = await res.json();
+  console.log("Loaded chat list:", chatList);
+
+  chatList.forEach(entry => {
+    const chatId = entry.chat_id;
+
+    /* const btn = document.createElement("button");
+    btn.className = "history-item";
+    btn.textContent = `Chat ${chatId.slice(0,8)}`;
+    btn.dataset.chatId = chatId; */
+  /*   
+    btn.addEventListener("click",async () => {
+      await loadChat(chatId);
+      switchToChat();
+    });
+ */
+    const item = createHistoryItem(chatId);
+
+    chatHistoryContainer.appendChild(item);
+  });
+
+  if (chatList.length > 0) {
+    const firstChatId = chatList[0].chat_id;
+    await loadChat(chatList[0].chat_id);
+    switchToChat();
+  }
+});
+
+async function loadChat(chatId) {
+  const res = await fetch(`/get_chat_history?chat_id=${chatId}`, {
+    method: "GET",
+    credentials: "include"
+  });
+
+  const data = await res.json();
+  const history = data.chat_history || data;
+
+  chats[chatId] = history.map(m => ({
+     sender: m.role === "assistant" ? "ai" : "user", 
+     text: m.message
+     }));
+
+     currentChatId = chatId;
+     renderChat(chatId);
+
+     document.querySelectorAll(".history-item").forEach(b =>
+       b.classList.toggle("active", b.dataset.chatId === chatId)
+     );
+}
+
+async function loadFilterDocuments()
+{
+  try
+  {
+    const res = await fetch("/get_documents", {
+      method: "GET",
+      credentials: "include"
+    });
+    const data = await res.json();
+    const docs = data.documents ?? [];
+
+    if (!window.filterContent)
+    {
+      console.error("Filter content element not found.");
+      return;
+    }
+
+    filterContent.innerHTML = "";
+
+    if (!Array.isArray(docs) || docs.length === 0)
+    {
+      filterContent.innerHTML = "<p>No documents available.</p>";
+      return;
+    }
+    
+    docs.forEach(doc => {
+      const label = document.createElement("label");
+      label.className = "filter-document-item";
+      label.innerHTML = `
+        <input type="checkbox" value="${doc.parent_id}" />
+        <span>${doc.title}</span>
+      `;
+      filterContent.appendChild(label);
+    });
+  }
+  catch (err)
+  {
+    console.error("Error loading documents:", err);
+    filterContent.innerHTML = "<p>Error loading documents.</p>";
+  }
+}
+
