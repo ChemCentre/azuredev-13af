@@ -772,25 +772,38 @@ body[data-theme="dark"] .history-item-menu button:hover {
 .filter-content 
 {
   display: flex;
-  gap: 10px;
-  align-items: center;
-  cursor: pointer;
+  flex-direction: column;  
+  gap: 12px;
+  overflow-y: auto;
+  max-height: calc(100vh - 140px);
 }
 
-.filter-doc-item 
+.filter-doc-item
 {
   display: flex;
-  gap: 10px;
   align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
   cursor: pointer;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.filter-doc-item:hover 
+{
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .filter-doc-item input 
 {
-  transform: scale(1.2);
+  transform: scale(1.15);
+  cursor: pointer;
 }
 
 .filter-doc-item span 
 {
   font-size: 14px;
+  line-height: 1.4;
+  word-break: break-word;
+  white-space: normal;
 }

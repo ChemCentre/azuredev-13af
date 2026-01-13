@@ -1,107 +1,3 @@
-""" from azure.storage.blob import BlobServiceClient
-from load_secrets import get_secret
-from dotenv import load_dotenv
-import json
-import time
-import uuid
-import os
-
-load_dotenv()
-
-ACCOUNT_NAME = get_secret("azure-storage-account")
-ACCOUNT_KEY = get_secret("azure-storage-key")
-CONTAINER_NAME = get_secret("azure-storage-container")
-CHAT_CONTAINER_NAME = "chathistory"
-
-connection_string = f"DefaultEndpointsProtocol=https;AccountName={ACCOUNT_NAME};AccountKey={ACCOUNT_KEY};EndpointSuffix=core.windows.net"
-blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-container_client = blob_service_client.get_container_client(CONTAINER_NAME)
-chat_container_client = blob_service_client.get_container_client(CHAT_CONTAINER_NAME)
-
-try:
-    chat_container_client.create_container()
-    print("[storage] Chat history container created.")
-except Exception as e:
-    print("[storage] Chat history container already exists.")
-
-def upload_file_to_blob(file_path, blob_name):
-    Uploads a file to Azure Blob Storage and returns the blob URL.
-    with open(file_path, "rb") as data:
-        container_client.upload_blob(name=blob_name, data=data, overwrite=True)
-    blob_url = f"https://{ACCOUNT_NAME}.blob.core.windows.net/{CONTAINER_NAME}/{blob_name}"
-    return blob_url
-
-def create_chat_id():
-    Generates a unique chat ID.
-    return str(uuid.uuid4())
-
-CHAT_LIST_BLOB = "chats.json"
-
-def load_chat_list():
-    Returns list of all that chats stored in blob.
-    blob_client = container_client.get_blob_client(CHAT_LIST_BLOB)
-
-    if not blob_client.exists():
-        print("[storage] No chat list found")
-        return []
-    
-    try:
-        data = json.loads(blob_client.download_blob().readall())
-        print(f"[storage] Chat list loaded: {CHAT_LIST_BLOB} | Total chats: {len(data)}")
-        return data
-    except Exception as e:
-        print("Chat list blob load error:", e)
-        return []
-    
-def save_chat_list(chat_list):
-    Saves the list of all chats to blob.
-    blob_client = container_client.get_blob_client(CHAT_LIST_BLOB)
-
-    try:
-        blob_client.upload_blob(json.dumps(chat_list, indent=2), overwrite=True)
-        print(f"[storage] Chat list saved to blob: {CHAT_LIST_BLOB} | Total chats: {len(chat_list)}")
-    except Exception as e:
-        print("Chat list blob save error:", e)
-
-
-def save_chat_message(chat_id, role, message):
-    blob_name = f"{chat_id}.json"
-    blob_client = chat_container_client.get_blob_client(blob_name)
-
-    try:
-        #Load existing history
-        if blob_client.exists():
-            data = json.loads(blob_client.download_blob().readall())
-        else:
-            data = []
-        
-        data.append({"role": role, "message": message, "timestamp": time.time()})
-        blob_client.upload_blob(json.dumps(data, indent=2), overwrite=True)
-        print(f"[storage] Chat saved to blob: {blob_name} | Total messages: {len(data)}")
-    
-    except Exception as e:
-        print("Chat blob save error:", e)
-
-
-def load_chat_history(chat_id):
-    blob_name = f"{chat_id}.json"
-    blob_client = chat_container_client.get_blob_client(blob_name)
-
-    if not blob_client.exists():
-        print("[storage] No chat history found")
-        return []
-    
-    try:
-        data = json.loads(blob_client.download_blob().readall())
-        print(f"[storage] Chat history loaded: {blob_name} | Total messages: {len(data)}")
-        return data
-    except Exception as e:
-        print("Chat blob load error:", e)
-        return []
-    
-
- """
-
 from azure.storage.blob import BlobServiceClient
 from load_secrets import get_secret
 from dotenv import load_dotenv
@@ -116,6 +12,7 @@ ACCOUNT_NAME = get_secret("azure-storage-account")
 ACCOUNT_KEY = get_secret("azure-storage-key")
 MAIN_CONTAINER = get_secret("azure-storage-container")
 CHAT_CONTAINER = "chathistory"
+
 
 connection_string = (
     f"DefaultEndpointsProtocol=https;"
@@ -224,26 +121,86 @@ def load_chat_history(chat_id):
     except Exception as e:
         print("[storage] Chat load error:", e)
         return []
+    
+# -------------------------------
+# Per chat active documents (checkbox filters)
 
-def save_chat_prefix(chat_id, prefix):
-    """Saves the chat prefix to a separate blob."""
-    blob_name = f"{chat_id}_prefix.json"
-    data = {"active_prefix": prefix}
+def save_active_documents(chat_id, documents):
+    """Saves the active documents for a chat."""
+    if documents is None:
+        documents = []
+
+    if isinstance(documents, str):
+        documents = [documents]
+    
+    if not isinstance(documents, list):
+        documents = []
+    
+    blob_name = f"{chat_id}_documents.json"
+    blob = chat_container_client.get_blob_client(blob_name)
+    data = {"active_documents": documents}
+
+    try:
+        blob.upload_blob(json.dumps(data, indent=2), overwrite=True)
+        print(f"[storage] Saved active documents for {chat_id}: {documents}")
+    except Exception as e:
+        print("[storage] Active documents save error:", e)
+
+
+def load_active_documents(chat_id):
+    """Loads the active documents for a chat."""
+    blob_name = f"{chat_id}_documents.json"
+    blob = chat_container_client.get_blob_client(blob_name)
+    try:
+        if not blob.exists():
+            return []
+        
+        data = json.loads(blob.download_blob().readall())
+        return data.get("active_documents", [])
+    
+        if docs is None:
+            return []
+        
+        if isinstance(docs, str):
+            return [docs]
+        
+        if not isinstance(docs, list):
+            return []
+        
+        return docs
+    except Exception as e:
+        return []
+    
+def clear_active_documents(chat_id):
+    """Clears the active documents for a chat."""
+    save_active_documents(chat_id, [])
+
+
+# -------------------------------
+#Per chat thread id (agent memory per chat)
+#-------------------------------
+
+def save_chat_thread_id(chat_id, thread_id):
+    """Saves the chat thread ID to a separate blob."""
+    blob_name = f"{chat_id}_thread.json"
+    data = {"thread_id": thread_id}
 
     blob = chat_container_client.get_blob_client(blob_name)
     try:
         blob.upload_blob(json.dumps(data), overwrite=True)
-        print(f"[storage] Saved prefix for {chat_id}")
+        print(f"[storage] Saved thread ID for {chat_id}: {thread_id}")
     except Exception as e:
-        print("[storage] Chat prefix save error:", e)
+        print("[storage] Chat thread ID save error:", e)
 
-def load_chat_prefix(chat_id):
-    """Loads the chat prefix from a separate blob."""
-    blob_name = f"{chat_id}_prefix.json"
+def load_chat_thread_id(chat_id):
+    """Loads the chat thread ID from a separate blob."""
+    blob_name = f"{chat_id}_thread.json"
+    blob_client = chat_container_client.get_blob_client(blob_name)
     try:
-        blob_client = chat_container_client.get_blob_client(blob_name)
+        if not blob_client.exists():
+            return None
         content = blob_client.download_blob().readall()
         data = json.loads(content)
-        return data.get("active_prefix")
+        return data.get("thread_id")
     except Exception:
         return None

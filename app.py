@@ -4,7 +4,7 @@ from azure.identity import DefaultAzureCredential
 from azure.ai.agents.models import ListSortOrder
 from azure.storage.blob import BlobServiceClient
 from openai import AzureOpenAI
-from storage import upload_file_to_blob, save_chat_message,load_chat_history,create_chat_id,load_chat_list,save_chat_list,save_chat_prefix
+from storage import create_chat_id, load_chat_list, save_chat_list, save_chat_message, load_chat_history, save_active_documents, load_active_documents, clear_active_documents, save_chat_thread_id, load_chat_thread_id, upload_file_to_blob
 from load_secrets import get_secret
 from dotenv import load_dotenv
 import tempfile
@@ -31,10 +31,10 @@ EMBED_KEY = get_secret("embedding-key")
 EMBED_DEPLOYMENT = get_secret("embedding-deployment")
 API_VERSION = "2023-05-15"
 
-#LOGIN_USERNAME = get_secret("login-username")
-#LOGIN_PASSWORD = get_secret("login-password")
-LOGIN_USERNAME = "admin"
-LOGIN_PASSWORD = "admin123"
+LOGIN_USERNAME = get_secret("Username")
+LOGIN_PASSWORD = get_secret("Password")
+
+LOW_INTENT = {"hi", "hello", "hey", "thanks", "thank you", "ok", "okay"}
 
 # ---------------------------------------------------------------------
 # Flask setup
@@ -63,43 +63,27 @@ def create_clean_thread():
     print(f"[DEBUG] Created new thread: {thread.id}")
     return thread.id
 
-def get_user_thread():
-    """Get or create thread for current session."""
-    if "thread_id" not in session:
-        session["thread_id"] = create_clean_thread()
-        session["is_new_chat"] = True  # Mark as new chat
-    return session["thread_id"]
+def get_thread_for_chat(chat_id: str) -> str:
+    """Get or create thread ID associated with chat ID."""
 
-def reset_user_thread():
-    """Reset thread for new chat."""
-    if "thread_id" in session:
-        try:
-            project.agents.threads.delete(session["thread_id"])
-        except Exception:
-            pass
+    threads_map = session.get("threads_by_chat", {})
+    if chat_id in threads_map:
+        return threads_map[chat_id]
+    
+    persisted = load_chat_thread_id(chat_id)
+    if persisted:
+        threads_map[chat_id] = persisted
+        session["threads_by_chat"] = threads_map
+        print(f"[DEBUG] Loaded persisted thread for chat {chat_id}: {persisted}")
+        return persisted
+    
+    new_thread = create_clean_thread()
+    save_chat_thread_id(chat_id, new_thread)
+    threads_map[chat_id] = new_thread
+    session["threads_by_chat"] = threads_map
+    return new_thread
 
-    #session.clear()  # Clear entire session
-    session["thread_id"] = create_clean_thread()
-    session["is_new_chat"] = True
-    session.pop("active_prefix", None)
-    print(f"[DEBUG] Reset thread for new chat: {session['thread_id']}")
-
-def get_active_prefix():
-    """Return the currently active document prefix for the user session"""
-    return session.get("active_prefix")
-
-def set_active_prefix(prefix):
-    """Store the active document prefix in the user session."""
-    session["active_prefix"] = prefix.lower()
-    print(f"[DEBUG] Active prefix: {prefix}")
-
-def clear_active_prefix():
-    """Clear the active document prefix."""
-    if "active_prefix" in session:
-        print(f"[DEBUG] Cleared active prefix: {session['active_prefix']}")
-        del session["active_prefix"]
-
-def embed_query(text):
+def embed_query(text: str):
     """Generate embeddings for the user query using Azure AI Foundry."""
     try:
         response = embedding_client.embeddings.create(
@@ -110,31 +94,6 @@ def embed_query(text):
     except Exception as e:
         print("[ERROR] Embedding generation failed:", e)
         return None
-    
-""" def get_chat_id():
-    if "chat_id" not in session:
-        session["chat_id"] = create_chat_id()
-    return session["chat_id"] """
-
-def get_chat_id():
-    """
-    Returns the current chat id for this session.
-    If none yet, creates one and ensures it's in the global chat list.
-    """
-    chat_id = session.get("chat_id")
-    if not chat_id:
-        chat_id = create_chat_id()
-        session["chat_id"] = chat_id
-
-        # Ensure chat list contains this chat
-        chat_list = load_chat_list()
-        if chat_id not in chat_list:
-            chat_list.insert(0, chat_id)  # newest first
-            save_chat_list(chat_list)
-
-        print(f"[CHAT] New chat_id created and saved: {chat_id}")
-    return chat_id
-
 
 #---------------------------------------------------------------------
 # Authentication decorator
@@ -180,24 +139,27 @@ def logout():
 @login_required
 def home():
     # Start fresh every time someone visits the home page
-    if "thread_id" not in session:
-        session["thread_id"] = create_clean_thread()
-        #reset_user_thread()
-    #chat_history = load_chat_history(get_chat_id())
     return render_template("index.html")
-    #return render_template("index.html")
 
 @app.route("/new_chat", methods=["POST"])
 @login_required
 def new_chat():
     """Explicit new chat endpoint."""
-    reset_user_thread()
-    session.pop("active_prefix", None)
     chat_id = create_chat_id()
 
     chat_list = load_chat_list()
-    chat_list.append(chat_id)
-    save_chat_list(chat_list)
+    if chat_id not in chat_list:
+        chat_list.insert(0, chat_id)
+        save_chat_list(chat_list)
+    
+    #create a new thread for this chat
+    thread_id = create_clean_thread()
+    save_chat_thread_id(chat_id, thread_id)
+
+    # Cache in session
+    threads_map = session.get("threads_by_chat", {})
+    threads_map[chat_id] = thread_id
+    session["threads_by_chat"] = threads_map
 
     #session.pop("chat_id", None)  # Clear chat ID for new chat
     return jsonify({"status": "New chat started", "chat_id": chat_id})
@@ -209,12 +171,25 @@ def list_chats():
     chat_list = load_chat_list()
     return jsonify([{"chat_id": cid} for cid in chat_list])
 
-@app.route("/chat/<chat_id>", methods=["GET"])
+@app.route("/get_chat_history", methods=["GET"])
 @login_required
-def get_chat(chat_id):
-     """Endpoint to load a specific chat by ID."""
-     chat_history = load_chat_history(chat_id)
-     return jsonify({"chat_history": chat_history})
+def get_chat_history():
+    """Endpoint to retrieve chat history."""
+    chat_id = request.args.get("chat_id") #or get_chat_id()
+    if not chat_id:
+        return jsonify({"chat_history": [], "active_documents": []})
+    try:
+        chat_history = load_chat_history(chat_id)
+        # Restore prefix
+        active_docs = load_active_documents(chat_id)
+
+        return jsonify({
+            "chat_history": chat_history,
+            "active_documents": active_docs
+            })
+    except Exception as e:
+        print("Failed to load chat history error:", e)
+        return jsonify({"chat_history": [], "active_documents": []})
 
 @app.route("/about")
 @login_required
@@ -227,27 +202,20 @@ def about():
 @app.route("/upload_file", methods=["POST"])
 @login_required
 def upload_file():
-    thread_id = get_user_thread()
+    
     file = request.files.get("doc_file")
     chat_id = request.form.get("chat_id")
     if not file:
         return jsonify({"response": "No file received."}), 400
 
     if not chat_id:
-        chat_id = get_chat_id()
+        return jsonify({"response": "chat_id is required."}), 400
 
     try:
         # save temporarily and upload to blob
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
             file.save(temp_file.name)
             blob_url = upload_file_to_blob(temp_file.name, file.filename)
-        
-        # Notify agent about the new document
-        project.agents.messages.create(
-            thread_id=thread_id,
-            role="user",
-            content=f"I have uploaded a document: {blob_url}. Please do NOT summarise it yet. Wait until I ask questions about it."
-        )
 
         # Trigger indexer
         indexer_name = "mcpdocument-rag-search-indexer"
@@ -255,6 +223,8 @@ def upload_file():
         headers = {"api-key": SEARCH_KEY}
         resp = requests.post(indexer_url, headers=headers)
         print(f"[DEBUG] Indexer trigger: {resp.status_code}")
+
+        save_chat_message(chat_id, "assistant", f"File uploaded: {file.filename}")
 
         return jsonify({
             "response": f"File uploaded successfully: {file.filename}",
@@ -267,143 +237,128 @@ def upload_file():
 # ---------------------------------------------------------------------
 # Azure Cognitive Search Query
 # ---------------------------------------------------------------------
-def query_azure_search(query, thread_id, chat_id):
-    try:
 
-        #Generate embedding for user query
+def query_azure_search(query: str, chat_id: str): 
+    try:
         vector = embed_query(query)
-        if vector is None:
-            print("[ERROR] Query embedding failed.")
+        if not vector:
             return ""
 
-        url = f"{SEARCH_ENDPOINT}/indexes/{SEARCH_INDEX}/docs/search?api-version=2024-07-01"
-        headers = {"Content-Type": "application/json", "api-key": SEARCH_KEY}
+        headers = {
+            "Content-Type": "application/json",
+            "api-key": SEARCH_KEY
+        }
 
-        # -------------------------------------------------------------
-        # Fetch document titles dynamically
-        # -------------------------------------------------------------
-        try:
+        # -------------------------------------------
+        # Load checkbox-selected documents for chat
+        # -------------------------------------------
+        selected_docs = load_active_documents(chat_id)  # <-- storage.py
+        print("[DEBUG] Checkbox filters active:", selected_docs)
+
+        filter_condition = None
+        if selected_docs:
+            # Map filenames → parent_ids
             titles_url = (
                 f"{SEARCH_ENDPOINT}/indexes/{SEARCH_INDEX}/docs"
                 "?api-version=2023-07-01-Preview&$select=title,parent_id&$top=2000"
             )
-            titles_response = requests.get(titles_url, headers=headers)
-            #print(json.dumps(titles_response.json(), indent=2))
-            titles_response.raise_for_status()
-            title_docs = titles_response.json().get("value", [])
+            titles_resp = requests.get(titles_url, headers=headers)
+            titles_resp.raise_for_status()
 
-            titles = [d["title"] for d in title_docs]
-            parents = {d["title"]: d.get("parent_id") for d in title_docs}
+            title_docs = titles_resp.json().get("value", [])
+            parent_ids = [
+                d["parent_id"]
+                for d in title_docs
+                if d["title"] in selected_docs
+            ]
 
-            known_prefixes = [t.split()[0].lower() for t in titles if t]
-            #print(f"[DEBUG] Indexed document prefixes: {known_prefixes}")
-        
-        except Exception as e:
-            print("[DEBUG] Title fetch error:", e)
-            prefix_match = None
+            if parent_ids:
+                filter_condition = " or ".join(
+                    [f"parent_id eq '{pid}'" for pid in parent_ids]
+                )
+                print("[DEBUG] Using checkbox filter:", filter_condition)
 
-            # Detect prefix match from the user query
-        prefix_match = None
-        for prefix in known_prefixes:
-            if prefix in query.lower():
-                prefix_match = prefix
-                break
-
-        active_prefix = get_active_prefix()
-
-        if prefix_match and prefix_match != active_prefix:
-            print(f"[DEBUG] Switching document context (old: {active_prefix}, new: {prefix_match})")
-            set_active_prefix(prefix_match)
-
-            try:
-                save_chat_prefix(chat_id, prefix_match)
-                print(f"[DEBUG] Saved chat prefix: {prefix_match} for chat: {chat_id}")
-            except Exception as e:
-                print("Failed to save chat prefix error:", e)
-
-        elif any(x in query.lower() for x in ["all documents", "every document", "all files"]):
-            clear_active_prefix()
-
-            try:
-                save_chat_prefix(chat_id, None)
-                print(f"[DEBUG] Cleared chat prefix for chat: {chat_id}")
-            except Exception as e:
-                print("Failed to clear chat prefix error:", e)
-
-            print("[DEBUG] User requested search across all documents.")
-
-        elif not prefix_match:
-            prefix_match = get_active_prefix()
-            if prefix_match:
-                print(f"[DEBUG] Reusing active prefix: {prefix_match}")
-            else:
-                print("[DEBUG] No active prefix; searching all documents.")
-
-
-
-        # -------------------------------------------------------------
-        # AI behaviour: if a specific document is active, load FULL doc
-        # -------------------------------------------------------------
-        filter_condition = None
-        if prefix_match:
-            for t in titles:
-                if t.lower().startswith(prefix_match):
-                    parent_id = parents.get(t)
-                    if parent_id:
-                        filter_condition = f"parent_id eq '{parent_id}'"
-                    break
-        
+        # -------------------------------------------
+        # Search payload (IMPORTANT CHANGES HERE)
+        # -------------------------------------------
         payload = {
             "search": query,
             "queryType": "semantic",
             "semanticConfiguration": "mcpdocument-rag-search-semantic-configuration",
             "select": "chunk,title,parent_id",
-            "top": 12,
-            "vectorQueries": [
-                {
-                    "kind": "vector",
-                    "fields": "text_vector",
-                    "k": 25,
-                    "vector": vector
-                }
-            ]
+            "top": 40,  # <-- increase retrieval depth
+            "vectorQueries": [{
+                "kind": "vector",
+                "fields": "text_vector",
+                "k": 40,
+                "vector": vector
+            }]
         }
 
         if filter_condition:
             payload["filter"] = filter_condition
-            print(f"[DEBUG] Using filter: {filter_condition}")
-        
-        url = f"{SEARCH_ENDPOINT}/indexes/{SEARCH_INDEX}/docs/search?api-version=2024-07-01"
-        resp = requests.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
-        results = resp.json().get("value", [])
 
-        print(f"[DEBUG] Retrieved {len(results)} chunks from vector search.")
+        resp = requests.post(
+            f"{SEARCH_ENDPOINT}/indexes/{SEARCH_INDEX}/docs/search?api-version=2024-07-01",
+            headers=headers,
+            json=payload
+        )
+        resp.raise_for_status()
+
+        results = resp.json().get("value", [])
+        print(f"[DEBUG] Retrieved {len(results)} chunks")
 
         if not results:
             return ""
-        
-        context_parts = []
+
+        # -------------------------------------------
+        # Aggregate by document
+        # -------------------------------------------
+        per_doc = {}
         for r in results:
-            title = r.get("title", "")
-            chunk = r.get("chunk", "")
-            context_parts.append(f"{title}\n{chunk}")
-            
+            pid = r.get("parent_id")
+            per_doc.setdefault(pid, []).append(
+                f"{r.get('title','')}\n{r.get('chunk','')}"
+            )
+
+        # -------------------------------------------
+        # Build final context (balanced across docs)
+        # -------------------------------------------
+        context_parts = []
+        for pid, chunks in per_doc.items():
+            context_parts.extend(chunks[:5])  # limit dominance per doc
+
         full_context = "\n\n".join(context_parts)
 
-        if len(full_context) > 180000:
-            full_context = full_context[:180000] + "\n\n...[TRUNCATED]..."
-            
-        return full_context
-    
+        return full_context[:180000]
+
     except Exception as e:
         print("Azure Search error:", e)
-        print("status:", resp.status_code)
-        print("url", url)
-        print("payload sent:", json.dumps(payload, indent=2))
-        print("Response:", resp.text)
-        resp.raise_for_status
         return ""
+
+
+
+def build_retrieval_query(chat_id: str, user_message: str, max_turns: int = 4) -> str:
+
+    history = load_chat_history(chat_id)
+    recent = history[-max_turns:] if history else []
+    parts = []
+
+    for m in recent:
+        role = m.get("role", "")
+        msg = (m.get("message", "") or "").strip()
+        if not msg:
+            continue
+
+        if len(msg) > 400:
+            msg = msg[:400] + "..."
+        parts.append(f"{role.upper()}: {msg}")
+
+    convo = "\n".join(parts)
+    if convo:
+        return f"{convo}\n\nUSER: {user_message}"
+    return user_message
+
 
 # ---------------------------------------------------------------------
 # Chat Endpoint - FIXED: Use consistent thread, not reset every message
@@ -412,14 +367,26 @@ def query_azure_search(query, thread_id, chat_id):
 @login_required
 def send_message():
     user_message = request.json.get("message", "").strip()
+    chat_id = request.json.get("chat_id")
 
     if not user_message:
         return jsonify({"response": "No message provided."})
     
-    chat_id = request.json.get("chat_id")
-
     if not chat_id:
-        chat_id = get_chat_id()
+        return jsonify({"response": "chat_id is required."})
+    
+    normalized = user_message.lower()
+    selected_docs = load_active_documents(chat_id)
+
+    if normalized in LOW_INTENT:
+        return jsonify({
+            "response": "Hi, What would you like to know, or which document should I look at?"
+        })
+    
+    if not selected_docs and len(normalized.split()) < 3:
+        return jsonify({
+            "response": "Please select at least one document to assist with your query."
+        })
 
     chat_list = load_chat_list()
     if chat_id not in chat_list:
@@ -433,19 +400,50 @@ def send_message():
 
     try:
         # Use the same thread for the session - don't reset every message!
-        thread_id = get_user_thread()
+        thread_id = get_thread_for_chat(chat_id)
 
-        context = query_azure_search(user_message, thread_id, chat_id)
+        #retrieval_query = build_retrieval_query(chat_id, user_message, max_turns=4)
+        retrieval_query = user_message
+        context = query_azure_search(retrieval_query, chat_id)
 
-        if not context or not context.strip():
-            return jsonify({"response": "No relevant information found in the provided documents."})
 
-        # Build message
-        MAX_CONTEXT = 180000
-        if len(context) > MAX_CONTEXT:
-            context = context[:MAX_CONTEXT] + "\n\n[Context truncated]"
+        if not context.strip():
+            return jsonify({"response": "No relevant information found in the selected documents."})
+        
+        #Add a small recent chat snippet for pronoun resolution
+        recent = load_chat_history(chat_id)[-6:]
+        recent_lines = []
+        for m in recent:
+            role = m.get("role", "")
+            msg = (m.get("message", "") or "").strip()
+            if len(msg) > 250:
+                msg = msg[:250] + "..."
+            recent_lines.append(f"{role.upper()}: {msg}")
+        recent_block = "\n".join(recent_lines)
 
-        message_text = f"""CONTEXT:
+        system_note = ""
+        if not selected_docs:
+            system_note = (
+                "SYSTEM NOTE: \n"
+                "No document filters were selected. Context was retrived from all documents.\n\n "
+            )
+
+        instruction_block = """
+INSTRUCTIONS:
+You must answer using ONLY the information in CONTEXT.
+You must include a section titled "References" after the answer.
+Each reference must contain the document title.
+Include a section identifier ONLY if it appears explicitly in the CONTEXT text.
+Do NOT invent page numbers.
+Do NOT invent section numbers.
+Do NOT reference chunk IDs.
+Do NOT mention system internals."""
+
+        message_text = f"""{system_note}{instruction_block}
+RECENT CHAT:    
+{recent_block}
+
+CONTEXT:
 {context}
 
 QUESTION:
@@ -490,26 +488,6 @@ QUESTION:
         print("Agent error:", e)
         return jsonify({"response": f"Error: {str(e)}"})
 
-@app.route("/get_chat_history", methods=["GET"])
-@login_required
-def get_chat_history():
-    """Endpoint to retrieve chat history."""
-    chat_id = request.args.get("chat_id") #or get_chat_id()
-    if not chat_id:
-        return jsonify({"chat_history": []})
-    try:
-        chat_history = load_chat_history(chat_id)
-        # Restore prefix
-        prefix = load_chat_history("chat_id")
-        session["active_prefix"] = prefix
-
-        return jsonify({
-            "chat_history": chat_history,
-            "active_prefix": prefix
-            })
-    except Exception as e:
-        print("Failed to load chat history error:", e)
-        return jsonify({"chat_history": []})
 
 @app.route("/delete_chat", methods=["DELETE"])
 @login_required
@@ -521,67 +499,91 @@ def delete_chat():
 
     print(f"[DELETE] Deleting chat_id: {chat_id}")   
 
-    # Delete chat history blob
-    try:
-        from storage import chat_container_client
-        blob_name = f"{chat_id}.json"
-        blob_client = chat_container_client.get_blob_client(blob_name)
+    thread_id = load_chat_thread_id(chat_id)
 
-        if blob_client.exists():
-            blob_client.delete_blob()
-            print(f"[DELETE] Deleted blob file: {blob_name}") 
-        else:
-            print(f"[DELETE] Blob file not found: {blob_name}")
-    
-    except Exception as e:
-        print("Failed to delete chat blob error:", e)
-        return jsonify({"error": f"Failed to delete chat file"}), 500
-    
-    # Remove from chat list
-    try:
-        chat_list = load_chat_list()
+    from storage import chat_container_client
 
-        if chat_id in chat_list:
-            chat_list.remove(chat_id)
-            save_chat_list(chat_list)
-            print(f"[DELETE] Removed chat_id from chat list: {chat_id}")
-        else:
-            print(f"[DELETE] chat_id not found in chat list: {chat_id}")
+    blobs_to_delete = [
+        f"{chat_id}.json",
+        f"{chat_id}_documents.json",
+        f"{chat_id}_thread.json"
+    ]
 
-    except Exception as e:
-        print("Failed to update chat list error:", e)
-        return jsonify({"error": "Failed to update chat list"}), 500
-    
-    if session.get("chat_id") == chat_id:
-        session.pop("chat_id", None)
-        print(f"[DELETE] Cleared chat_id from session: {chat_id}")
-    
-    return jsonify({"status": "Chat deleted successfully."})
+    for blob_name in blobs_to_delete:
+        try:
+            blob = chat_container_client.get_blob_client(blob_name)
+            if blob.exists():
+                blob.delete_blob()
+                print(f"[DELETE] Deleted blob file: {blob_name}")
+        except Exception as e:
+            print(f"Failed to delete blob {blob_name} error:", e)
 
-@app.route("/get_documents", methods=["GET"])
+    
+    #Remove from chat list
+    chat_list = load_chat_list()
+    if chat_id in chat_list:
+        chat_list.remove(chat_id)
+        save_chat_list(chat_list)
+        print(f"[DELETE] Removed chat_id {chat_id} from chat list.")    
+
+    #Remove from session cache
+    threads_map = session.get("threads_by_chat", {})
+    if chat_id in threads_map:
+        threads_map.pop(chat_id, None)
+        session["threads_by_chat"] = threads_map
+        print(f"[DELETE] Removed chat_id {chat_id} from session cache.")
+
+    #Delete agent thread
+    if thread_id:
+        try:
+            project.agents.threads.delete(thread_id)
+            print(f"[DELETE] Deleted agent thread: {thread_id}")
+        except Exception as e:
+            print(f"Failed to delete agent thread {thread_id} error:", e)
+
+    return jsonify({"status": "Chat deleted.", })
+    
+
+@app.route("/get_filterdocuments", methods=["GET"])
 @login_required
-def get_documents():
+def get_filterdocuments():
     """Return list of documents for filtering."""
     try:
-        headers = {"Content-Type": "application/json", "api-key": SEARCH_KEY}
-        url = (f"{SEARCH_ENDPOINT}/indexes/{SEARCH_INDEX}/docs""?api-version=2023-07-01-Preview&$select=title,parent_id&$top=2000" )
-        resp = requests.get(url, headers=headers)
-        resp.raise_for_status() 
-        docs = resp.json().get("value", [])
-
-        seen = {}
-        for d in docs:
-            pid = d.get("parent_id")
-            title = d.get("title")
-            if pid and title and pid not in seen:
-                seen[pid] = {
-                    "parent_id": pid,
-                    "title": title
-                }
-        return jsonify({"documents": list(seen.values())})
+        blobs = []
+        from storage import main_container_client
+        for blob in main_container_client.list_blobs():
+            blobs.append(blob.name)
+        return jsonify(blobs)
     except Exception as e:
-        print("Failed to retrieve documents error:", e)
-        return jsonify({"documents": []})
+        print("Failed to retrieve document blobs error:", e)
+        return jsonify([])
+
+
+@app.route("/set_active_documents", methods=["POST"])
+@login_required
+def set_active_documents():
+    data = request.json or {}
+    chat_id = data.get("chat_id")
+    documents = data.get("documents", [])
+
+    if not chat_id:
+        return jsonify({"error": "chat_id required"}), 400
+
+    # Store per-chat selection
+    save_active_documents(chat_id, documents)
+
+    print(f"[FILTER] Chat {chat_id} documents set to: {documents}")
+    return jsonify({"status": "ok", "active_documents": documents})
+
+""" @app.route("/update_chat_filters", methods=["POST"])
+@login_required
+def update_chat_filters():
+    data = request.json
+    chat_id = data["chat_id"]
+    filters = data["filters"]
+
+    save_chat_filters(chat_id, filters)
+    return jsonify({"status": "ok"}) """
 
 # ---------------------------------------------------------------------
 if __name__ == "__main__":

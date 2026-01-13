@@ -1,9 +1,3 @@
-// ============================================================================
-// PitPixie Frontend Chat Interface
-// Chat UI, file upload, message sending, and communication with Flask backend.
-// Supports: chat-first OR upload-first on welcome screen and in-chat uploads.
-// ============================================================================
-
 // ------------------- DOM ELEMENTS -------------------
 const chatMessages     = document.querySelector(".chat-messages");
 const chatInputBar     = document.querySelector(".chat-input");
@@ -11,22 +5,18 @@ const input            = document.querySelector(".message-input");
 const sendBtn          = document.querySelector(".send-btn");
 const chatWindow       = document.querySelector(".chat-window");
 
-// Welcome screen
 const welcomeScreen    = document.querySelector(".welcome-screen");
 const welcomeForm      = document.getElementById("upload-form");
 const welcomeInput     = document.querySelector(".welcome-message-input");
 const welcomeFileInput = document.getElementById("welcome-file");
 
-// In-chat upload
 const fileInput        = document.getElementById("file-upload");
 
-// Sidebar / nav
 const newChatBtn            = document.querySelector(".new-chat-btn");
 const chatHistoryContainer  = document.querySelector(".chat-history");
 const sidebar               = document.querySelector(".sidebar");
 const toggleBtn             = document.querySelector(".toggle-btn");
 
-// Settings / About
 const settingsWindow        = document.getElementById("settings-window");
 const settingsBtn           = document.querySelector(".mini-icon[title='Settings']");
 const backToChat            = document.getElementById("back-to-chat");
@@ -34,26 +24,23 @@ const aboutWindow           = document.getElementById("about-window");
 const aboutBtn              = document.querySelector(".mini-icon[title='About']");
 const backToChatFromAbout   = document.getElementById("back-to-chat-from-about");
 
-// Export & Theme
 const exportBtn    = document.querySelector(".export-btn");
 const exportSelect = document.getElementById("config-export");
 const themeButtons = document.querySelectorAll("#config-theme .theme-option");
 
-const filterBtn    = document.querySelector(".mini-icon[title='Filter']");
+const filterBtn      = document.querySelector(".mini-icon[title='Filter']");
 const filterSiderbar = document.getElementById("filter-sidebar");
-const closeFilterBtn = document.getElementById("close-filter")
-const filterContent = document.querySelector(".filter-content");
+const closeFilterBtn = document.getElementById("close-filter");
+const filterContent  = document.querySelector(".filter-content");
 
 // ------------------- STATE -------------------
 let chats = {};                // { chatId: [ { sender, text } ] }
 let currentChatId = null;
-let chatCounter = 0;
 
 // ============================================================================
 // UI helpers
 // ============================================================================
 function switchToChat() {
-  // Only switch if welcome is visible
   if (welcomeScreen && welcomeScreen.style.display !== "none") {
     welcomeScreen.style.display = "none";
     chatMessages.style.display = "flex";
@@ -77,57 +64,16 @@ function addMessage(text, sender, save = true) {
   chatMessages.appendChild(el);
   chatMessages.scrollTop = chatMessages.scrollHeight;
 
-  if (save) {
-    if (!currentChatId) return;
+  if (save && currentChatId) {
+    chats[currentChatId] = chats[currentChatId] || [];
     chats[currentChatId].push({ sender, text });
     updateHistoryPreview(currentChatId, text);
   }
 }
 
-function createChat() {
-  chatCounter++;
-  const id = `chat-${chatCounter}`;
-  chats[id] = [];
-
-  const btn = document.createElement("button");
-  btn.className = "history-item";
-  btn.textContent = `Chat ${chatCounter}`;
-  btn.dataset.chatId = id;
-  btn.addEventListener("click", () => setActiveChat(id));
-
-  chatHistoryContainer.appendChild(btn);
-  setActiveChat(id);
-  return id;
-}
-
-function setActiveChat(chatId) {
-  if (!chats[chatId]) return;
-  currentChatId = chatId;
-  chatWindow.style.display = "flex";
-  settingsWindow.style.display = "none";
-  aboutWindow.style.display = "none";
-
-  document.querySelectorAll(".chat-history .history-item").forEach(b =>
-    b.classList.toggle("active", b.dataset.chatId === chatId)
-  );
-  renderChat(chatId);
-}
-
-function renderChat(chatId) {
-  chatMessages.innerHTML = "";
-  (chats[chatId] || []).forEach(m => {
-    const el = document.createElement("div");
-    el.classList.add("message", m.sender);
-    el.textContent = m.text;
-    chatMessages.appendChild(el);
-  });
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
 function updateHistoryPreview(chatId, lastText) {
   const btn = chatHistoryContainer.querySelector(`[data-chat-id="${chatId}"]`);
   if (!btn) return;
-
   const preview = lastText.length > 30 ? `${lastText.slice(0,30)}…` : lastText;
   btn.textContent = `Chat ${chatId.slice(0,8)} - ${preview}`;
 }
@@ -155,7 +101,7 @@ function createHistoryItem(chatId) {
 
   const delBtn = document.createElement("button");
   delBtn.textContent = "Delete Chat";
-  
+
   delBtn.addEventListener("click", async () => {
     const ok = confirm("Delete this chat permanently?");
     if (!ok) return;
@@ -166,14 +112,11 @@ function createHistoryItem(chatId) {
     });
 
     wrapper.remove();
-
     if (currentChatId === chatId) {
       chatMessages.innerHTML = "";
       currentChatId = null;
     }
-
     menu.classList.remove("show");
-
   });
 
   menu.appendChild(delBtn);
@@ -194,10 +137,29 @@ function createHistoryItem(chatId) {
 // ============================================================================
 // Network helpers
 // ============================================================================
+async function ensureChatId() {
+  if (currentChatId) return currentChatId;
+
+  const res = await fetch("/new_chat", {
+    method: "POST",
+    credentials: "include"
+  });
+  const data = await res.json();
+  currentChatId = data.chat_id;
+
+  chats[currentChatId] = [];
+
+  const item = createHistoryItem(currentChatId);
+  chatHistoryContainer.prepend(item);
+
+  return currentChatId;
+}
+
 async function sendToAgent(userText) {
   if (!userText) return;
   switchToChat();
-  if (!currentChatId) createChat();
+
+  await ensureChatId();
 
   addMessage(userText, "user");
   input.value = "";
@@ -206,16 +168,17 @@ async function sendToAgent(userText) {
   try {
     const res = await fetch("/send_message", {
       method: "POST",
-      headers: { 
-        "Content-Type": "application/json", 
+      headers: {
+        "Content-Type": "application/json",
         "X-Requested-With": "XMLHttpRequest"
       },
-      credentials:"include",
-      body: JSON.stringify({ 
+      credentials: "include",
+      body: JSON.stringify({
         message: userText,
-        chat_id: currentChatId 
+        chat_id: currentChatId
       })
     });
+
     const data = await res.json();
     typingEl.remove();
     addMessage(data.response || "🤖 No response received.", "ai");
@@ -229,6 +192,8 @@ async function sendToAgent(userText) {
 async function uploadFile(file) {
   if (!file) return { ok: false, response: "No file selected." };
 
+  await ensureChatId();
+
   const formData = new FormData();
   formData.append("doc_file", file);
   formData.append("chat_id", currentChatId);
@@ -236,17 +201,18 @@ async function uploadFile(file) {
   const typingEl = showTyping();
 
   try {
-    const res = await fetch("/upload_file", 
-      { method: "POST", 
-        headers: { "X-Requested-With": "XMLHttpRequest" },
-        credentials:"include",
-        body: formData });
+    const res = await fetch("/upload_file", {
+      method: "POST",
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+      credentials: "include",
+      body: formData
+    });
 
     const data = await res.json();
     typingEl.remove();
     addMessage(data.response || "✅ File uploaded.", "ai");
     return { ok: true, data };
-    
+
   } catch (err) {
     typingEl.remove();
     addMessage("❌ Upload failed.", "ai");
@@ -261,7 +227,7 @@ async function handleWelcomeSubmit() {
   const text = (welcomeInput.value || "").trim();
 
   switchToChat();
-  if (!currentChatId) createChat();
+  await ensureChatId();
 
   if (file) {
     addMessage(`📎 Uploaded: ${file.name}`, "user");
@@ -276,20 +242,19 @@ async function handleWelcomeSubmit() {
 }
 
 // ============================================================================
-// Welcome screen: submit handler (chat-first OR upload-first)
+// Welcome screen: submit handler
 // ============================================================================
 welcomeForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   await handleWelcomeSubmit();
 });
 
-// Also allow instant upload if a file is picked on welcome screen
 welcomeFileInput.addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
 
   switchToChat();
-  if (!currentChatId) createChat();
+  await ensureChatId();
 
   addMessage(`📎 Uploaded: ${file.name}`, "user");
   await uploadFile(file);
@@ -299,19 +264,12 @@ welcomeFileInput.addEventListener("change", async (e) => {
 // ============================================================================
 // In-chat message sending & Enter key
 // ============================================================================
-
-// Send button click
 sendBtn.addEventListener("click", () => {
   const text = (input.value || "").trim();
   if (!text) return;
-  switchToChat();
   sendToAgent(text);
 });
 
-// Global Enter key handling (welcome & chat textareas)
-// - Enter sends
-// - Shift+Enter makes a newline
-// - IME-safe (ignore composing)
 document.addEventListener("keydown", (e) => {
   if (e.isComposing || e.keyCode === 229) return;
 
@@ -321,27 +279,20 @@ document.addEventListener("keydown", (e) => {
 
   if (!e.shiftKey && (e.key === "Enter" || e.key === "NumpadEnter") && (isWelcomeBox || isChatBox)) {
     e.preventDefault();
-
     const text = (active.value || "").trim();
     if (!text) return;
 
-    if (isWelcomeBox) {
-      // Sequential: upload first (if any), then send
-      handleWelcomeSubmit();
-    } else {
-      switchToChat();
-      sendToAgent(text);
-    }
+    if (isWelcomeBox) handleWelcomeSubmit();
+    else sendToAgent(text);
   }
 });
 
-// In-chat upload via the bottom "+" button
 fileInput.addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
 
   switchToChat();
-  if (!currentChatId) createChat();
+  await ensureChatId();
 
   addMessage(`📎 Uploaded: ${file.name}`, "user");
   await uploadFile(file);
@@ -356,37 +307,15 @@ toggleBtn.addEventListener("click", () => {
   toggleBtn.textContent = sidebar.classList.contains("collapsed") ? "➡️" : "⬅️";
 });
 
-
 newChatBtn.addEventListener("click", async () => {
-  const res = await fetch("/new_chat", {
-    method: "POST",
-    credentials: "include"
-});
-
-  const data = await res.json();
-  const chatId = data.chat_id || data.chatId;
-
-/*   const btn = document.createElement("button");
-  btn.className = "history-item";
-  btn.textContent = `Chat ${chatId.slice(0,8)}`;
-  btn.dataset.chatId = chatId; */
-
-/*   btn.addEventListener("click",async () => {
-    await loadChat(chatId);
-    switchToChat();
-  });
- */
-  const item = createHistoryItem(chatId);
-  chatHistoryContainer.prepend(item);
-
-  chats[chatId] = [];
-  currentChatId = chatId;
+  // Force a brand new chat from backend
+  currentChatId = null;
   chatMessages.innerHTML = "";
+  await ensureChatId();
   switchToChat();
-
 });
 
-// Export chat to CSV
+// Export chat to CSV (unchanged)
 exportBtn.addEventListener("click", () => {
   if (!currentChatId || !chats[currentChatId]?.length) {
     alert("No messages to export.");
@@ -412,9 +341,10 @@ exportBtn.addEventListener("click", () => {
   document.body.removeChild(link);
 });
 
-filterBtn.addEventListener("click", () => {
+// Filter sidebar
+filterBtn.addEventListener("click", async () => {
   filterSiderbar.style.display = "flex";
-  loadFilterDocuments();
+  await loadFilteredDocuments();
 });
 
 closeFilterBtn.addEventListener("click", () => {
@@ -422,7 +352,7 @@ closeFilterBtn.addEventListener("click", () => {
 });
 
 // ============================================================================
-// Settings / About
+// Settings / About (unchanged)
 // ============================================================================
 settingsBtn.addEventListener("click", () => {
   chatWindow.style.display = "none";
@@ -447,26 +377,16 @@ backToChatFromAbout.addEventListener("click", () => {
 });
 
 // ============================================================================
-// Themes & Preferences
+// Themes & Preferences (unchanged)
 // ============================================================================
 window.addEventListener("DOMContentLoaded", () => {
   const saved = localStorage.getItem("theme") || "light";
   applyTheme(saved);
 
-  const iframe = document.querySelector(".about-iframe");
-  if (iframe) {
-    iframe.addEventListener("load", () => {
-      iframe.contentWindow.postMessage({ theme: saved }, "*");
-    });
-  }
-
   themeButtons.forEach(btn => {
     btn.addEventListener("click", () => {
       const t = btn.dataset.theme;
       applyTheme(t);
-      if (iframe && iframe.contentWindow) {
-        iframe.contentWindow.postMessage({ theme: t }, "*");
-      }
     });
   });
 
@@ -482,41 +402,29 @@ function applyTheme(theme) {
   themeButtons.forEach(btn => btn.classList.toggle("active", btn.dataset.theme === theme));
 }
 
+// ============================================================================
+// Load chat list on startup + auto-load first chat
+// ============================================================================
 window.addEventListener("DOMContentLoaded", async () => {
-  // Load chat history from server
-  const res = await fetch("/get_chat_list", {
-    method: "GET",
-    credentials: "include"
-  });
-
+  const res = await fetch("/get_chat_list", { method: "GET", credentials: "include" });
   const chatList = await res.json();
-  console.log("Loaded chat list:", chatList);
 
+  chatHistoryContainer.innerHTML = "";
   chatList.forEach(entry => {
     const chatId = entry.chat_id;
-
-    /* const btn = document.createElement("button");
-    btn.className = "history-item";
-    btn.textContent = `Chat ${chatId.slice(0,8)}`;
-    btn.dataset.chatId = chatId; */
-  /*   
-    btn.addEventListener("click",async () => {
-      await loadChat(chatId);
-      switchToChat();
-    });
- */
     const item = createHistoryItem(chatId);
-
     chatHistoryContainer.appendChild(item);
   });
 
   if (chatList.length > 0) {
-    const firstChatId = chatList[0].chat_id;
     await loadChat(chatList[0].chat_id);
     switchToChat();
   }
 });
 
+// ============================================================================
+// Load a chat + rehydrate filters (checkboxes)
+// ============================================================================
 async function loadChat(chatId) {
   const res = await fetch(`/get_chat_history?chat_id=${chatId}`, {
     method: "GET",
@@ -524,60 +432,94 @@ async function loadChat(chatId) {
   });
 
   const data = await res.json();
-  const history = data.chat_history || data;
+  const history = data.chat_history || [];
+  const activeDocs = data.active_documents || [];
 
   chats[chatId] = history.map(m => ({
-     sender: m.role === "assistant" ? "ai" : "user", 
-     text: m.message
-     }));
+    sender: m.role === "assistant" ? "ai" : "user",
+    text: m.message
+  }));
 
-     currentChatId = chatId;
-     renderChat(chatId);
+  currentChatId = chatId;
+  renderChat(chatId);
 
-     document.querySelectorAll(".history-item").forEach(b =>
-       b.classList.toggle("active", b.dataset.chatId === chatId)
-     );
+  document.querySelectorAll(".history-item").forEach(b =>
+    b.classList.toggle("active", b.dataset.chatId === chatId)
+  );
+
+  // If filter sidebar is open, reflect active docs immediately
+  if (filterSiderbar.style.display === "flex") {
+    await loadFilteredDocuments(activeDocs);
+  }
 }
 
-async function loadFilterDocuments()
-{
-  try
-  {
-    const res = await fetch("/get_documents", {
-      method: "GET",
-      credentials: "include"
-    });
-    const data = await res.json();
-    const docs = data.documents ?? [];
+function renderChat(chatId) {
+  chatMessages.innerHTML = "";
+  (chats[chatId] || []).forEach(m => {
+    const el = document.createElement("div");
+    el.classList.add("message", m.sender);
+    el.textContent = m.text;
+    chatMessages.appendChild(el);
+  });
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
 
-    if (!window.filterContent)
-    {
-      console.error("Filter content element not found.");
-      return;
-    }
+// ============================================================================
+// Filters
+// ============================================================================
+function getSelectedDocuments() {
+  return Array.from(
+    document.querySelectorAll('.filter-doc-item input[type="checkbox"]:checked')
+  ).map(cb => cb.value);
+}
 
-    filterContent.innerHTML = "";
+async function loadFilteredDocuments(forceChecked = []) {
+  try {
+    const response = await fetch("/get_filterdocuments", { credentials: "include" });
+    const docs = await response.json();
 
-    if (!Array.isArray(docs) || docs.length === 0)
-    {
+    filterContent.innerHTML = ""; // ✅ clear to avoid duplicates
+
+    if (!Array.isArray(docs) || docs.length === 0) {
       filterContent.innerHTML = "<p>No documents available.</p>";
       return;
     }
-    
+
     docs.forEach(doc => {
       const label = document.createElement("label");
-      label.className = "filter-document-item";
+      label.className = "filter-doc-item";
       label.innerHTML = `
-        <input type="checkbox" value="${doc.parent_id}" />
-        <span>${doc.title}</span>
-      `;
+        <input type="checkbox" name="files" value="${doc}" />
+        <span>${doc}</span>`;
+
+      const checkbox = label.querySelector("input");
+
+      // ✅ rehydrate checked state
+      if (forceChecked.includes(doc)) checkbox.checked = true;
+
+      checkbox.addEventListener("change", async () => {
+        const selectedDocs = getSelectedDocuments();
+        await fetch("/set_active_documents", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest"
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            chat_id: currentChatId,
+            documents: selectedDocs
+          })
+        });
+
+        console.log("[FILTER] Active docs:", selectedDocs);
+      });
+
       filterContent.appendChild(label);
     });
-  }
-  catch (err)
-  {
+
+  } catch (err) {
     console.error("Error loading documents:", err);
     filterContent.innerHTML = "<p>Error loading documents.</p>";
   }
 }
-
