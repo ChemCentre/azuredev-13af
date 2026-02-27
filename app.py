@@ -335,7 +335,6 @@ def run_indexer():
     print("[INDEXER] Indexer triggered manually.")
     return jsonify({"response": "Indexer started."})
 
-
 # ---------------------------------------------------------------------
 # Azure Cognitive Search Query
 # ---------------------------------------------------------------------
