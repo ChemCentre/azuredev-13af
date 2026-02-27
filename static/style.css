@@ -18,6 +18,7 @@
 /* Container holds both sidebars */
 .sidebar-container {
   display: flex;
+  height: 100vh;
   flex-shrink: 0;
 }
 
@@ -88,7 +89,7 @@
 .new-chat-btn {
   width: 70%;
   padding: 10px;
-  margin: 0 auto 20px auto; /* top: 0, bottom: 20px, left/right: auto */
+  margin: 0 auto 20px auto; 
   border: 1px solid #aaa;
   border-radius: 8px;
   background: #D3E5E8;
@@ -120,7 +121,7 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin: 0 auto 20px auto; /* top: 0, bottom: 20px, left/right: auto */
+  margin: 0 auto 20px auto; 
 }
 
 .history-item:hover {
@@ -617,6 +618,8 @@ button {
   padding: 0;
   overflow: visible;
   transition: background 0.2s;
+  display: flex;
+  align-items: stretch;
 }
 
 .history-item-wrapper:hover {
@@ -629,9 +632,12 @@ button {
   border: none;
   color: #fff;
   text-align: left;
-  padding: 12px 14px;
+  padding: 0px 14px;
   cursor: pointer;
   font-size: 14px;
+  display: flex;
+  align-items: center;
+
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -657,6 +663,10 @@ button {
   font-size: 20px;
   cursor: pointer;
   padding: 10px 14px;
+
+  height: 100%;
+  display: flex;
+  align-items: center;
 
   border-left: 1px solid rgba(255,255,255,0.25);
   border-radius: 0 10px 10px 0;
@@ -745,6 +755,13 @@ body[data-theme="dark"] .history-item-menu button:hover {
   flex-direction: column;
   padding: 15px;
   border-left: 1px solid #aaa;
+
+  height: 100vh;
+  overflow: hidden;
+  resize: horizontal;
+  min-width: 260px;
+  max-width: 600px;
+  position: relative;
 }
 
 .filter-header 
@@ -774,8 +791,9 @@ body[data-theme="dark"] .history-item-menu button:hover {
   display: flex;
   flex-direction: column;  
   gap: 12px;
+  flex-grow: 1;
   overflow-y: auto;
-  max-height: calc(100vh - 140px);
+  overflow-x: hidden;
 }
 
 .filter-doc-item
@@ -807,3 +825,70 @@ body[data-theme="dark"] .history-item-menu button:hover {
   word-break: break-word;
   white-space: normal;
 }
+
+.resize-handle
+{
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  background: transparent;
+  z-index: 2000;
+}
+
+.resize-handle:hover
+{
+  background: rgba(255,255,255,0.15);
+}
+
+.mine-bar
+{
+  display: flex;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-secondary, #f5f5f5);
+  border-bottom: 1px solid #ddd;
+}
+
+.mine-select
+{
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.create-mine-btn
+{
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: none;
+  background: #2d7ef7;
+  color: white;
+  cursor: pointer;
+}
+
+.create-mine-btn:hover
+{
+  opacity: 0.9;
+}
+
+.filter-folder
+{
+  margin-bottom: 10px;
+}
+
+.filter-folder-label
+{
+  font-weight:bold;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.filter-file-list
+{
+  margin-left: 15px;
+  display: flex;
+  flex-direction: column;
+}
+

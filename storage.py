@@ -1,6 +1,9 @@
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobServiceClient, ContentSettings
 from load_secrets import get_secret
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
+from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+from urllib.parse import quote
 import json
 import time
 import uuid
@@ -12,6 +15,8 @@ ACCOUNT_NAME = get_secret("azure-storage-account")
 ACCOUNT_KEY = get_secret("azure-storage-key")
 MAIN_CONTAINER = get_secret("azure-storage-container")
 CHAT_CONTAINER = "chathistory"
+
+PAGE_MAP_CONTAINER = "pagemaps"
 
 
 connection_string = (
@@ -29,12 +34,21 @@ main_container_client = blob_service.get_container_client(MAIN_CONTAINER)
 # Chat history + chat list container
 chat_container_client = blob_service.get_container_client(CHAT_CONTAINER)
 
+page_map_container = blob_service.get_container_client(PAGE_MAP_CONTAINER)
+
 # Ensure chat container exists
 try:
     chat_container_client.create_container()
     print("[storage] Chat history container created.")
 except Exception:
     print("[storage] Chat history container already exists.")
+
+#Ensure page map container exists
+try:
+    page_map_container.create_container()
+    print("[storage] Page map container created.")
+except Exception:
+    print("[storage] Page map container already exists.")
 
 # -------------------------------
 # Document Upload (unchanged)
@@ -204,3 +218,52 @@ def load_chat_thread_id(chat_id):
         return data.get("thread_id")
     except Exception:
         return None
+    
+
+def upload_page_map(filename: str, page_map: dict):     
+    """Uploads a page number map as a JSON blob to the PAGE_MAP_CONTAINER."""
+
+    if not page_map:
+        raise ValueError("Page map is empty")
+    
+    blob_name = f"{filename}.pagemap.json"
+    blob = page_map_container.get_blob_client(blob_name)
+
+    blob.upload_blob(
+        json.dumps(page_map,ensure_ascii=False, indent=2),
+        overwrite=True,
+        content_settings=ContentSettings(content_type="application/json")
+    )
+    print(f"[storage] Uploaded page map -> pagemaps/{blob_name}")
+
+def load_page_map(filename: str) -> dict:
+    try:
+        blob_name = f"{filename}.pagemap.json"
+        blob = page_map_container.get_blob_client(blob_name)
+        raw = blob.download_blob().readall()
+        return json.loads(raw)
+    except Exception as e:
+        print(f"[storage] No page map found for {filename}: {e}")
+        return {}
+    
+def generate_read_sas_for_blob(blob_name: str, expiry_minutes: int = 60) -> str:
+    """Generates a read-only SAS URL for a blob valid for a specified number of minutes."""
+    sas_token = generate_blob_sas(
+        account_name=ACCOUNT_NAME,
+        container_name=MAIN_CONTAINER,
+        blob_name=blob_name,
+        account_key=ACCOUNT_KEY,
+        permission=BlobSasPermissions(read=True),
+        expiry=datetime.utcnow() + timedelta(minutes=expiry_minutes)
+    )
+
+    encoded_blob_name = quote(blob_name, safe="/")
+
+    url = (
+        f"https://{ACCOUNT_NAME}.blob.core.windows.net/"
+        f"{MAIN_CONTAINER}/"
+        f"{encoded_blob_name}"
+        f"?{sas_token}"
+    )
+
+    return url

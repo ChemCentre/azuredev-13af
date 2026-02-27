@@ -1,18 +1,16 @@
+import os
+import threading
 from flask import Flask, request, jsonify, render_template, session, redirect
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents.models import ListSortOrder
-from azure.storage.blob import BlobServiceClient
 from openai import AzureOpenAI
-from storage import create_chat_id, load_chat_list, save_chat_list, save_chat_message, load_chat_history, save_active_documents, load_active_documents, clear_active_documents, save_chat_thread_id, load_chat_thread_id, upload_file_to_blob
+from storage import create_chat_id, load_chat_list, save_chat_list, save_chat_message, load_chat_history, save_active_documents, load_active_documents, save_chat_thread_id, load_chat_thread_id, upload_file_to_blob, upload_page_map, load_page_map, generate_read_sas_for_blob
+from content_understanding import debug_cu_printed_page_number, run_page_analyzer, build_page_map
 from load_secrets import get_secret
 from dotenv import load_dotenv
 import tempfile
 import requests
-import uuid
-import time
-import json
-import os
 import re
 
 load_dotenv()
@@ -29,10 +27,15 @@ FLASK_SECRET_KEY = get_secret("flask-secret-key")
 EMBED_ENDPOINT = get_secret("embedding-endpoint")
 EMBED_KEY = get_secret("embedding-key")
 EMBED_DEPLOYMENT = get_secret("embedding-deployment")
-API_VERSION = "2023-05-15"
+API_VERSION = "2024-02-01"
 
 LOGIN_USERNAME = get_secret("Username")
 LOGIN_PASSWORD = get_secret("Password")
+
+CU_ENDPOINT = get_secret("cu-endpoint")
+CU_KEY = get_secret("cu-key")
+CU_ANALYZER_ID = get_secret("cu-analyzer-id")
+CU_API_VERSION = "2025-05-01-preview"
 
 LOW_INTENT = {"hi", "hello", "hey", "thanks", "thank you", "ok", "okay"}
 
@@ -53,6 +56,9 @@ embedding_client = AzureOpenAI(
     api_key=EMBED_KEY
 )
 LAST_CONTEXT = {}
+PAGE_MAP_CACHE = {}
+
+
 
 # ---------------------------------------------------------------------
 # Utility functions
@@ -85,6 +91,19 @@ def get_thread_for_chat(chat_id: str) -> str:
 
 def embed_query(text: str):
     """Generate embeddings for the user query using Azure AI Foundry."""
+
+    print("[DEBUG] EMBED_ENDPOINT:", EMBED_ENDPOINT)
+    print("[DEBUG] EMBED_DEPLOYMENT:", EMBED_DEPLOYMENT)
+    print("[DEBUG] EMBED_API_VERSION:", API_VERSION)
+
+    if not EMBED_ENDPOINT or "openai.azure.com" not in EMBED_ENDPOINT:
+        print("[ERROR] EMBED_ENDPOINT does not look like an Azure OpenAI endpoint.")
+        return None
+
+    if not EMBED_DEPLOYMENT:
+        print("[ERROR] EMBED_DEPLOYMENT is empty.")
+        return None
+
     try:
         response = embedding_client.embeddings.create(
             model=EMBED_DEPLOYMENT,
@@ -94,7 +113,14 @@ def embed_query(text: str):
     except Exception as e:
         print("[ERROR] Embedding generation failed:", e)
         return None
-
+    
+def extract_page_index_from_chunk_id(chunk_id: str) -> int|None:
+    if not chunk_id:
+        return None
+    m = re.search(r"_pages_(\d+)", chunk_id)
+    if m:
+        return int(m.group(1))
+    return None
 #---------------------------------------------------------------------
 # Authentication decorator
 #---------------------------------------------------------------------
@@ -109,6 +135,16 @@ def login_required(route_function):
     wrapper.__name__ = route_function.__name__
     return wrapper
 
+
+def get_page_map_cached(title: str) -> dict:
+    """Retrieve or load the page map for a document title."""
+    if not title:
+        return {}
+    if title in PAGE_MAP_CACHE:
+        return PAGE_MAP_CACHE[title]
+    m = load_page_map(title)
+    PAGE_MAP_CACHE[title] = m or {}
+    return PAGE_MAP_CACHE[title]
 #---------------------------------------------------------------------
 # Login route
 #---------------------------------------------------------------------
@@ -175,7 +211,7 @@ def list_chats():
 @login_required
 def get_chat_history():
     """Endpoint to retrieve chat history."""
-    chat_id = request.args.get("chat_id") #or get_chat_id()
+    chat_id = request.args.get("chat_id") 
     if not chat_id:
         return jsonify({"chat_history": [], "active_documents": []})
     try:
@@ -215,14 +251,32 @@ def upload_file():
         # save temporarily and upload to blob
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
             file.save(temp_file.name)
-            blob_url = upload_file_to_blob(temp_file.name, file.filename)
 
-        # Trigger indexer
-        indexer_name = "mcpdocument-rag-search-indexer"
-        indexer_url = f"{SEARCH_ENDPOINT}/indexers/{indexer_name}/run?api-version=2021-04-30-Preview"
-        headers = {"api-key": SEARCH_KEY}
-        resp = requests.post(indexer_url, headers=headers)
-        print(f"[DEBUG] Indexer trigger: {resp.status_code}")
+            mine = request.form.get("mine_name")
+
+            if not mine:
+                return jsonify({"response": "Mine folder is required."}), 400
+            
+            blob_path = f"{mine}/{file.filename}"
+
+            blob_url = upload_file_to_blob(temp_file.name, blob_path)
+
+            print("[DEBUG] Mine selected:", mine)
+            print(f"[DEBUG] Uploaded file to blob: {blob_url}")
+
+            print(f"[DEBUG] local file path", temp_file.name)
+            print(f"[DEBUG] file exists:", os.path.exists(temp_file.name))
+            print(f"[DEBUG] file size:", os.path.getsize(temp_file.name))
+            
+            sas_url = generate_read_sas_for_blob(blob_path)
+            print(f"[DEBUG] Generated SAS URL for blob: {sas_url}")
+            print(f"[DEBUG] Starting CU background extraction for {file.filename}")
+
+            threading.Thread(
+                target=run_cu_background, 
+                args=(temp_file.name, blob_path, sas_url, file.filename),
+                daemon=True
+                ).start()
 
         save_chat_message(chat_id, "assistant", f"File uploaded: {file.filename}")
 
@@ -233,6 +287,54 @@ def upload_file():
     except Exception as e:
         print("Upload error:", e)
         return jsonify({"response": f"Upload failed: {str(e)}"}), 500
+
+
+def run_cu_background(temp_path, blob_path, sas_url, filename):
+    try:
+        print(f"[CU] Starting extraction: {filename}")
+
+        cu_result = run_page_analyzer(
+            sas_url, 
+            CU_ENDPOINT, 
+            CU_API_VERSION, 
+            CU_ANALYZER_ID)
+        
+        debug_cu_printed_page_number(cu_result)
+        page_map = build_page_map(cu_result)
+
+        if page_map:
+            upload_page_map(blob_path, page_map)
+
+            PAGE_MAP_CACHE[blob_path] = page_map
+
+            print(f"[CU] Page map saved: {filename} ({len(page_map)} pages)")
+
+        else:
+            print(f"[CU] Empty page map returned for {filename}")
+        
+    except Exception as e:
+        print(f"[CU] Extraction failed for {filename}: {e}")
+
+    finally:
+
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+                print(f"[CU] Temporary file removed: {filename}")
+        except Exception as e:
+            print(f"[CU] Failed to remove temporary file for {filename}: {e}")
+
+@app.route("/run_indexer", methods=["POST"])
+@login_required
+def run_indexer():
+
+    indexer_name = "mcpdocument-rag-search-indexer"
+    indexer_url = f"{SEARCH_ENDPOINT}/indexers/{indexer_name}/run?api-version=2021-04-30-Preview"
+    headers = {"api-key": SEARCH_KEY}
+    requests.post(indexer_url, headers=headers)
+    print("[INDEXER] Indexer triggered manually.")
+    return jsonify({"response": "Indexer started."})
+
 
 # ---------------------------------------------------------------------
 # Azure Cognitive Search Query
@@ -256,6 +358,12 @@ def query_azure_search(query: str, chat_id: str):
         print("[DEBUG] Checkbox filters active:", selected_docs)
 
         filter_condition = None
+
+        if not selected_docs:
+            print("No documents are selected.")
+            return ""
+
+
         if selected_docs:
             # Map filenames → parent_ids
             titles_url = (
@@ -266,11 +374,19 @@ def query_azure_search(query: str, chat_id: str):
             titles_resp.raise_for_status()
 
             title_docs = titles_resp.json().get("value", [])
-            parent_ids = [
-                d["parent_id"]
-                for d in title_docs
-                if d["title"] in selected_docs
-            ]
+
+            parent_ids = []
+
+            for d in title_docs:
+                full_title = d.get("title", "")
+                base_name = full_title.split("/")[-1]
+
+                for selected in selected_docs:
+                    selected_base = selected.split("/")[-1]
+
+                    if base_name == selected_base:
+                        parent_ids.append(d.get("parent_id"))
+                        break
 
             if parent_ids:
                 filter_condition = " or ".join(
@@ -285,7 +401,7 @@ def query_azure_search(query: str, chat_id: str):
             "search": query,
             "queryType": "semantic",
             "semanticConfiguration": "mcpdocument-rag-search-semantic-configuration",
-            "select": "chunk,title,parent_id",
+            "select": "chunk,title,parent_id,chunk_id",
             "top": 40,  # <-- increase retrieval depth
             "vectorQueries": [{
                 "kind": "vector",
@@ -315,12 +431,46 @@ def query_azure_search(query: str, chat_id: str):
         # Aggregate by document
         # -------------------------------------------
         per_doc = {}
+        #per_doc_page_i = {}
+
         for r in results:
             pid = r.get("parent_id")
-            per_doc.setdefault(pid, []).append(
-                f"{r.get('title','')}\n{r.get('chunk','')}"
-            )
+            title = r.get("title","")
+            chunk = r.get("chunk", "")
+            chunk_id = r.get("chunk_id")
 
+            if not pid:
+                continue
+
+            page_idx = extract_page_index_from_chunk_id(chunk_id)
+
+            printed_page = None
+            if title and page_idx is not None:
+                page_map = get_page_map_cached(title)
+
+                if not page_map:
+                    for key in PAGE_MAP_CACHE.keys():
+                        if key.endswith(title):
+                            page_map = PAGE_MAP_CACHE[key]
+                            print(f"[DEBUG] Found page map for {title} by suffix match: {key}")
+                            break
+
+                printed_page = page_map.get(str(page_idx)) 
+
+            print("[PAGE MAP DEBUG]",
+                  "title=", title,
+                  "chunk_id=", chunk_id,
+                  "page_idx=", page_idx,
+                  "printed_page=", printed_page)
+            
+            if printed_page:
+                page_text = f"(Printed Page: {printed_page})"
+            else:
+                page_text = f"Printed page: not available (PDF page {page_idx})"
+            
+            per_doc.setdefault(pid, []).append(
+                f"[{title} - {page_text}]\n{chunk}"
+            )
         # -------------------------------------------
         # Build final context (balanced across docs)
         # -------------------------------------------
@@ -335,8 +485,6 @@ def query_azure_search(query: str, chat_id: str):
     except Exception as e:
         print("Azure Search error:", e)
         return ""
-
-
 
 def build_retrieval_query(chat_id: str, user_message: str, max_turns: int = 4) -> str:
 
@@ -359,7 +507,6 @@ def build_retrieval_query(chat_id: str, user_message: str, max_turns: int = 4) -
         return f"{convo}\n\nUSER: {user_message}"
     return user_message
 
-
 # ---------------------------------------------------------------------
 # Chat Endpoint - FIXED: Use consistent thread, not reset every message
 # ---------------------------------------------------------------------
@@ -378,16 +525,19 @@ def send_message():
     normalized = user_message.lower()
     selected_docs = load_active_documents(chat_id)
 
+    # Low intent handling
     if normalized in LOW_INTENT:
         return jsonify({
             "response": "Hi, What would you like to know, or which document should I look at?"
         })
     
-    if not selected_docs and len(normalized.split()) < 3:
+    #No docs selected
+    if not selected_docs:
         return jsonify({
             "response": "Please select at least one document to assist with your query."
         })
-
+    
+    #Save User message
     chat_list = load_chat_list()
     if chat_id not in chat_list:
         chat_list.insert(0, chat_id)
@@ -399,17 +549,37 @@ def send_message():
         print("Failed to save chat message error:", e)
 
     try:
-        # Use the same thread for the session - don't reset every message!
+        # Use the same thread for the session - don't reset every message
         thread_id = get_thread_for_chat(chat_id)
 
         #retrieval_query = build_retrieval_query(chat_id, user_message, max_turns=4)
         retrieval_query = user_message
         context = query_azure_search(retrieval_query, chat_id)
 
-
         if not context.strip():
             return jsonify({"response": "No relevant information found in the selected documents."})
         
+        clean_names = [doc.split("/")[-1] for doc in selected_docs]
+        selected_list = "\n".join([f"- {doc}" for doc in clean_names])
+
+        meta_keywords = [
+            "what documents",
+            "which documents",
+            "selected documents",
+            "what have I selected"
+        ]
+
+        is_meta_question = any(k in normalized for k in meta_keywords)
+
+        selected_docs = f"""
+Selected Documents:
+The user has selected the following documents for this chat:
+{selected_list}
+
+If the user asks which documents are selected, list EXACTLY these documents names.
+Do NOT add, remove, or invent any documents.
+"""
+
         #Add a small recent chat snippet for pronoun resolution
         recent = load_chat_history(chat_id)[-6:]
         recent_lines = []
@@ -427,19 +597,72 @@ def send_message():
                 "SYSTEM NOTE: \n"
                 "No document filters were selected. Context was retrived from all documents.\n\n "
             )
-
-        instruction_block = """
+        if is_meta_question:
+            instruction_block = """
 INSTRUCTIONS:
-You must answer using ONLY the information in CONTEXT.
-You must include a section titled "References" after the answer.
-Each reference must contain the document title.
-Include a section identifier ONLY if it appears explicitly in the CONTEXT text.
-Do NOT invent page numbers.
-Do NOT invent section numbers.
-Do NOT reference chunk IDs.
-Do NOT mention system internals."""
 
-        message_text = f"""{system_note}{instruction_block}
+You MUST follow these formatting rules exactly.
+
+FORMAT RULES:
+ - Each document MUST be on its own line
+ - Each line MUST begin with "- "
+ - Show ONLY the file name (no folder path)
+ - Do NOT include a References section
+ - Do NOT combine multiple documents on one line 
+
+ OUTPUT EXAMPLE:
+
+ You have selected:
+    - document1.pdf
+    - document2.pdf
+    - document3.pdf
+"""
+        else:
+            instruction_block = """
+INSTRUCTIONS:
+
+You MUST follow these formatting rules exactly.
+
+RESPONSE FORMAT RULES:
+- Use clear structured formatting..
+- Each new point MUST start on a new line.
+- Use bullet points ("- ") for lists.
+- Do NOT write everything in one paragraph.
+- Leave a blank line between sections.
+- Make responses easy to read.
+
+CONTENT RULES:
+You must answer using ONLY the information in CONTEXT.
+
+REFERENCES RULES:
+You must include a section titled "References" at the end.
+
+The References section MUST:
+ - Start with the word: References
+ - Each reference MUST be on a new line
+ - Each reference MUST begin with "- "
+ - Include the document file name
+ - Include printed page number if available (e.g. "Printed page: 12")
+
+OUTPUT EXAMPLE:
+Three pit voids will remain at closure:
+- Darlot Main Pit
+- Eldorado Pit
+- Western Deep Leads Pit
+
+References:
+- document1.pdf (Printed page: 12)
+- document2.pdf (Printed page: 5)
+
+
+DO NOT:
+- Invent references
+- Invent page numbers
+- Mention chunk IDs
+- Mention system internals
+"""
+
+        message_text = f"""{selected_docs}{instruction_block}
 RECENT CHAT:    
 {recent_block}
 
@@ -475,6 +698,8 @@ QUESTION:
             if msg.role == "assistant" and msg.text_messages:
                 ai_response = msg.text_messages[-1].text.value
                 break
+        
+        ai_response = format_agent_response(ai_response)
         
         # Save chat to blob history
         try:
@@ -547,17 +772,94 @@ def delete_chat():
 @app.route("/get_filterdocuments", methods=["GET"])
 @login_required
 def get_filterdocuments():
-    """Return list of documents for filtering."""
     try:
-        blobs = []
         from storage import main_container_client
-        for blob in main_container_client.list_blobs():
-            blobs.append(blob.name)
-        return jsonify(blobs)
-    except Exception as e:
-        print("Failed to retrieve document blobs error:", e)
-        return jsonify([])
+        structure = {}
 
+        Excluded_prefixes = [
+            "labelingProjects",
+            "analyzerResults",
+            "analyzer",
+            "contentunderstanding",
+            "cu-results",
+            ".labels",
+            ".ocr",
+        ]
+
+        Excluded_Extensions = [
+            ".labels.json",
+            ".result.json"
+        ]
+
+        for blob in main_container_client.list_blobs():
+
+            blob_name = blob.name
+
+            if any(blob_name.startswith(prefix) for prefix in Excluded_prefixes):
+                continue
+
+            if any(blob_name.endswith(ext) for ext in Excluded_Extensions):
+                continue
+
+            if blob_name.startswith("."):
+                continue
+
+            if "/" in blob_name:
+                mine, filename = blob_name.split("/", 1)
+            else:
+                mine = "Uncategorized"
+                filename = blob_name
+
+            if filename == ".init":
+                continue
+            
+            structure.setdefault(mine, []).append(filename)
+
+        return jsonify(structure)
+    
+    except Exception as e:
+        print("Failed to retrieve document blobs error", e)
+        return jsonify({})
+
+def format_agent_response(text: str) -> str:
+    """Format the agent response for better readability."""
+    if not text:
+        return text
+
+    text = text.strip()
+    
+    #Normalize spacing
+    text = text.replace("\r", "")
+
+    #Ensure references section is on its own line
+    text = re.sub(r"(?i)References:", "\n\nReferences:\n", text, flags=re.IGNORECASE)
+
+    #Split inline bullet lists
+    text = re.sub(r":\s*-\s", ":\n\n- ", text)
+
+    #Ensure all "-" bullets start on new line
+    text = re.sub(r"\s+-\s+", "\n- ", text)
+
+    #Fix multiple bullets on same line
+    text = re.sub(r"(- [^\n]+)\s+- ", r"\1\n- ", text)
+
+    #Clean extra blank lines
+    lines = [line.strip() for line in text.split("\n")]
+    cleaned_lines = []
+    prev_blank = False
+
+    for line in lines:
+        if line == "":
+            if not prev_blank:
+                cleaned_lines.append(line)
+            prev_blank = True
+        else:
+            cleaned_lines.append(line)
+            prev_blank = False
+    
+    formatted = "\n".join(cleaned_lines)
+
+    return formatted.strip()
 
 @app.route("/set_active_documents", methods=["POST"])
 @login_required
@@ -575,15 +877,49 @@ def set_active_documents():
     print(f"[FILTER] Chat {chat_id} documents set to: {documents}")
     return jsonify({"status": "ok", "active_documents": documents})
 
-""" @app.route("/update_chat_filters", methods=["POST"])
+@app.route("/create_mine", methods=["POST"])
 @login_required
-def update_chat_filters():
-    data = request.json
-    chat_id = data["chat_id"]
-    filters = data["filters"]
+def create_mine():
+    data = request.json or {}
+    mine_name = data.get("mine_name", "").strip()
 
-    save_chat_filters(chat_id, filters)
-    return jsonify({"status": "ok"}) """
+    if not mine_name:
+        return jsonify({"error": "Mine name required"}), 400
+    
+    from storage import main_container_client
+
+    try:
+        placeholder_blob = f"{mine_name}/.init"
+
+        blob = main_container_client.get_blob_client(placeholder_blob)
+        blob.upload_blob(b"", overwrite=True)
+
+        return jsonify({"status": "mine created"})
+    
+    except Exception as e:
+        print("Create mine error:", e)
+        return jsonify({"error": "Failed to create mine"}), 500
+    
+@app.route("/get_mines", methods=["GET"])
+@login_required
+def get_mines():
+    from storage import main_container_client
+
+    mines = set()
+
+    try:
+        blobs = main_container_client.list_blobs()
+
+        for blob in blobs:
+            if "/" in blob.name:
+                mine = blob.name.split("/")[0]
+                mines.add(mine)
+        
+        return jsonify(sorted(list(mines)))
+    
+    except Exception as e:
+        print("Get mines error:", e)
+        return jsonify([])
 
 # ---------------------------------------------------------------------
 if __name__ == "__main__":

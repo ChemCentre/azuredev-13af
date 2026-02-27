@@ -21,6 +21,7 @@
       </div>
       
       <div class="filter-sidebar" id="filter-sidebar" style="display: none;">
+        <div class="resize-handle" id="filter-resize-handle"></div>
         <div class="filter-header">
           <h3>Filter Documents</h3>
           <button id="close-filter">✖️</button>
@@ -50,9 +51,20 @@
       <!-- Welcome screen (shown initially) -->
       <div class="welcome-screen">
         <h1>What are we mining today?</h1>
+ 
         <form class="welcome-input" id="upload-form" method="POST" enctype="multipart/form-data">
+          <div class="mine-selector">
+            <select id="welcome-mine-select" class="mine-select">
+              <option value="">Select Mine</option>
+            </select>
+            <button type="button" id="create-mine-btn-welcome" class="create-mine-btn">
+              + Create Mine
+            </button>
+          </div>
+
           <label for="welcome-file" class="upload-btn">+</label>
-          <input type="file" id="welcome-file" name="doc_file" style="display: none;" />
+          <input type="file" id="welcome-file" name="doc_file" multiple style="display: none;" />
+
           <textarea class="welcome-message-input" name="message" placeholder="Ask anything..."></textarea>
           <button type="submit" class="welcome-send-btn">Send</button>
         </form>
@@ -62,8 +74,19 @@
       <div class="chat-messages" style="display:none;"></div>
 
       <div class="chat-input" style="display:none;">
+
+        <div class="mine-bar">
+          <select id="chat-mine-select" class="mine-select">
+            <option value="">Select Mine</option>
+          </select>
+          <button type="button" id="create-mine-btn-chat" class="create-mine-btn">
+            + Create Mine
+          </button>
+        </div>
+
         <label for="file-upload" class="upload-btn">+</label>
-        <input type="file" id="file-upload" name="doc_file" style="display: none;" />
+        <input type="file" id="file-upload" name="doc_file" multiple style="display: none;" />
+
         <textarea class="message-input" placeholder="Type your message..."></textarea>
         <button class="send-btn" type="submit">Send</button>
       </div>

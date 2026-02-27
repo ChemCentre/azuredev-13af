@@ -32,6 +32,13 @@ const filterBtn      = document.querySelector(".mini-icon[title='Filter']");
 const filterSiderbar = document.getElementById("filter-sidebar");
 const closeFilterBtn = document.getElementById("close-filter");
 const filterContent  = document.querySelector(".filter-content");
+const resizeHandle   = document.getElementById("filter-resize-handle")
+
+//const mineSelect = document.getElementById("mine-select");
+const createMineBtnWelcome = document.getElementById("create-mine-btn-welcome");
+const createMineBtnChat = document.getElementById("create-mine-btn-chat")
+
+
 
 // ------------------- STATE -------------------
 let chats = {};                // { chatId: [ { sender, text } ] }
@@ -60,7 +67,9 @@ function showTyping() {
 function addMessage(text, sender, save = true) {
   const el = document.createElement("div");
   el.classList.add("message", sender);
-  el.textContent = text;
+
+  el.innerHTML = text.replace(/\n/g, "<br>"); // Preserve line breaks
+  //el.textContent = text;
   chatMessages.appendChild(el);
   chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -89,7 +98,13 @@ function createHistoryItem(chatId) {
 
   btn.addEventListener("click", async () => {
     await loadChat(chatId);
-    switchToChat();
+    //switchToChat();
+    showChatInterface();
+  });
+
+  btn.addEventListener("click", async () => {
+    await loadChat(chatId);
+    requestAnimationFrame(showChatInterface);
   });
 
   const optionsBtn = document.createElement("button");
@@ -126,13 +141,38 @@ function createHistoryItem(chatId) {
     menu.classList.toggle("show");
   });
 
-  document.addEventListener("click", () => menu.classList.remove("show"));
-
   wrapper.appendChild(btn);
   wrapper.appendChild(optionsBtn);
   wrapper.appendChild(menu);
   return wrapper;
 }
+
+function showChatInterface()
+{
+  //Hide other pages
+  if (settingsWindow) settingsWindow.style.display = "none";
+  if (aboutWindow) aboutWindow.style.display = "none";
+
+  //Show main chat window
+  if (chatWindow) chatWindow.style.display = "flex";
+
+  //Ensure welcome screen is hidden
+  if (welcomeScreen) welcomeScreen.style.display = "none";
+
+  //Ensure chat parts are visible
+  if (chatMessages) chatMessages.style.display = "flex";
+  if (chatInputBar) chatInputBar.style.display = "flex";
+}
+
+if(createMineBtnWelcome)
+  {
+    createMineBtnWelcome.addEventListener("click", handleCreateMine);
+  }
+
+  if(createMineBtnChat)
+  {
+    createMineBtnChat.addEventListener("click", handleCreateMine);
+  }
 
 // ============================================================================
 // Network helpers
@@ -189,55 +229,108 @@ async function sendToAgent(userText) {
   }
 }
 
-async function uploadFile(file) {
-  if (!file) return { ok: false, response: "No file selected." };
+async function uploadFile(files) {
+
+  if (!currentMine)
+  {
+    alert("Please select or create a mine first.");
+    return {ok: false}
+  }
+
+  if (!files || files.length === 0) 
+    return { ok: false, response: "No file selected." };
 
   await ensureChatId();
 
-  const formData = new FormData();
-  formData.append("doc_file", file);
-  formData.append("chat_id", currentChatId);
-
   const typingEl = showTyping();
 
-  try {
-    const res = await fetch("/upload_file", {
+  try 
+  {
+    for (const file of files) 
+    {
+      const formData = new FormData();
+      formData.append("doc_file", file);
+      formData.append("chat_id", currentChatId);
+      formData.append("mine_name", currentMine);
+
+      const res = await fetch("/upload_file", {
+        method: "POST",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+        credentials: "include",
+        body: formData
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) 
+      {
+        addMessage(data.response || `❌ Failed to upload ${file.name}.`, "ai");
+      } else 
+      {
+        addMessage(data.response || `✅ Uploaded: ${file.name}`, "ai");
+      }
+    }
+    await fetch("/run_indexer", {
       method: "POST",
-      headers: { "X-Requested-With": "XMLHttpRequest" },
-      credentials: "include",
-      body: formData
+      credentials: "include"
     });
-
-    const data = await res.json();
     typingEl.remove();
-    addMessage(data.response || "✅ File uploaded.", "ai");
-    return { ok: true, data };
 
-  } catch (err) {
+    await refreshFilterDocumentsPreserveSelection();
+
+    return { ok: true };
+  }
+  catch (err) 
+  {
     typingEl.remove();
     addMessage("❌ Upload failed.", "ai");
-    console.error(err);
-    return { ok: false, err };
-  }
+
+    return { ok: false};
+  }  
 }
+
 
 // Handles combined welcome submission flow (upload → send)
 async function handleWelcomeSubmit() {
-  const file = welcomeFileInput.files[0] || null;
+  const files = Array.from(welcomeFileInput.files || []);
   const text = (welcomeInput.value || "").trim();
 
   switchToChat();
   await ensureChatId();
 
-  if (file) {
-    addMessage(`📎 Uploaded: ${file.name}`, "user");
-    await uploadFile(file);
+  if(files.length > 0)
+  {
+    for (const file of files) 
+    {
+      addMessage(`📎 Uploaded: ${file.name}`, "user");
+    }
+
+    await uploadFile(files);
     welcomeFileInput.value = "";
   }
 
   if (text) {
     await sendToAgent(text);
     welcomeInput.value = "";
+  }
+}
+
+async function refreshFilterDocumentsPreserveSelection()
+{
+  try 
+  {
+    const selectedDocs = getSelectedDocuments();
+    await loadFilteredDocuments(selectedDocs);
+
+    const sidebar = document.getElementById("filter-content");
+    if(sidebar)
+    {
+      sidebar.scrollTop = sidebar.scrollTop;
+    }
+  }
+  catch(err)
+  {
+    console.error("Failed to refresh filter documents:", err);
   }
 }
 
@@ -250,14 +343,17 @@ welcomeForm.addEventListener("submit", async (e) => {
 });
 
 welcomeFileInput.addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
 
   switchToChat();
   await ensureChatId();
 
-  addMessage(`📎 Uploaded: ${file.name}`, "user");
-  await uploadFile(file);
+  for (const file of files) {
+    addMessage(`📎 Uploaded: ${file.name}`, "user");
+  }
+  await uploadFile(files);
+
   e.target.value = "";
 });
 
@@ -288,20 +384,27 @@ document.addEventListener("keydown", (e) => {
 });
 
 fileInput.addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
 
   switchToChat();
   await ensureChatId();
 
-  addMessage(`📎 Uploaded: ${file.name}`, "user");
-  await uploadFile(file);
+  for (const file of files) {
+    addMessage(`📎 Uploaded: ${file.name}`, "user");
+  }
+  await uploadFile(files);
   e.target.value = "";
 });
 
 // ============================================================================
 // UI controls
 // ============================================================================
+
+document.addEventListener("click", () =>{
+  document.querySelectorAll(".history-item-menu").forEach(menu => menu.classList.remove("show"));
+})
+
 toggleBtn.addEventListener("click", () => {
   sidebar.classList.toggle("collapsed");
   toggleBtn.textContent = sidebar.classList.contains("collapsed") ? "➡️" : "⬅️";
@@ -312,7 +415,7 @@ newChatBtn.addEventListener("click", async () => {
   currentChatId = null;
   chatMessages.innerHTML = "";
   await ensureChatId();
-  switchToChat();
+  showChatInterface();
 });
 
 // Export chat to CSV (unchanged)
@@ -406,6 +509,8 @@ function applyTheme(theme) {
 // Load chat list on startup + auto-load first chat
 // ============================================================================
 window.addEventListener("DOMContentLoaded", async () => {
+  await loadMines();
+
   const res = await fetch("/get_chat_list", { method: "GET", credentials: "include" });
   const chatList = await res.json();
 
@@ -458,7 +563,7 @@ function renderChat(chatId) {
   (chats[chatId] || []).forEach(m => {
     const el = document.createElement("div");
     el.classList.add("message", m.sender);
-    el.textContent = m.text;
+    el.innerHTML = m.text.replace(/\n/g, "<br>"); // Preserve line breaks
     chatMessages.appendChild(el);
   });
   chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -473,53 +578,256 @@ function getSelectedDocuments() {
   ).map(cb => cb.value);
 }
 
-async function loadFilteredDocuments(forceChecked = []) {
-  try {
-    const response = await fetch("/get_filterdocuments", { credentials: "include" });
-    const docs = await response.json();
-
-    filterContent.innerHTML = ""; // ✅ clear to avoid duplicates
-
-    if (!Array.isArray(docs) || docs.length === 0) {
-      filterContent.innerHTML = "<p>No documents available.</p>";
-      return;
-    }
-
-    docs.forEach(doc => {
-      const label = document.createElement("label");
-      label.className = "filter-doc-item";
-      label.innerHTML = `
-        <input type="checkbox" name="files" value="${doc}" />
-        <span>${doc}</span>`;
-
-      const checkbox = label.querySelector("input");
-
-      // ✅ rehydrate checked state
-      if (forceChecked.includes(doc)) checkbox.checked = true;
-
-      checkbox.addEventListener("change", async () => {
-        const selectedDocs = getSelectedDocuments();
-        await fetch("/set_active_documents", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Requested-With": "XMLHttpRequest"
-          },
-          credentials: "include",
-          body: JSON.stringify({
-            chat_id: currentChatId,
-            documents: selectedDocs
-          })
-        });
-
-        console.log("[FILTER] Active docs:", selectedDocs);
-      });
-
-      filterContent.appendChild(label);
+async function loadFilteredDocuments(forceChecked = [])
+{
+  try
+  {
+    const response = await fetch("/get_filterdocuments", {
+      credentials: "include"
     });
 
-  } catch (err) {
-    console.error("Error loading documents:", err);
-    filterContent.innerHTML = "<p>Error loading documents.</p>";
+    const structure = await response.json();
+
+    filterContent.innerHTML = "";
+
+    if(!structure || Object.keys(structure).length === 0)
+      {
+        filterContent.innerHTML = "<p>No documents available.</p>";
+        return;
+      }
+
+      Object.entries(structure).forEach(([mine, files]) => {
+
+        //folder container
+        const folderDiv = document.createElement("div");
+        folderDiv.className = "filter-folder";
+
+        const folderLabel = document.createElement("label");
+        folderLabel.className = "filter-folder-label";
+
+        //folder checkbox
+        const folderCheckbox = document.createElement("input");
+        folderCheckbox.type = "checkbox";
+        folderCheckbox.dataset.mine = mine;
+
+        folderLabel.appendChild(folderCheckbox);
+        folderLabel.appendChild(document.createTextNode(` ${mine}`));
+
+        folderDiv.appendChild(folderLabel);
+
+        //File Container
+        const fileListDiv = document.createElement("div");
+        fileListDiv.className = "filter-file-list";
+
+        let validFileCount = 0;
+        let checkedFileCount = 0;
+
+        files.forEach(filename => {
+
+          if(filename === ".init") return; //Skip .init files
+
+          validFileCount++;
+
+          const fullPath = `${mine}/${filename}`;
+
+          const fileLabel = document.createElement("label");
+          fileLabel.className = "filter-doc-item";
+
+          const fileCheckbox = document.createElement("input");
+          fileCheckbox.type = "checkbox";
+          fileCheckbox.value = fullPath;
+
+          if(forceChecked.includes(fullPath))
+          {
+            fileCheckbox.checked = true;
+            checkedFileCount++;
+          }
+
+          fileLabel.appendChild(fileCheckbox);
+          fileLabel.appendChild(document.createTextNode(`${filename}`));
+
+          fileListDiv.appendChild(fileLabel);
+
+          //Individual File Change
+
+          fileCheckbox.addEventListener("change", async () => {
+            const selectedDocs = getSelectedDocuments();
+
+            const allFiles = fileListDiv.querySelectorAll("input[type='checkbox']");
+            const checkedFiles = fileListDiv.querySelectorAll("input[type='checkbox']:checked");
+
+            folderCheckbox.checked = allFiles.length > 0 && allFiles.length === checkedFiles.length;
+
+            await fetch("/set_active_documents", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Requested-With": "XMLHttpRequest"
+              },
+              credentials: "include",
+              body: JSON.stringify({
+                chat_id: currentChatId,
+                documents: selectedDocs
+              })
+            });
+          });
+        });
+
+        folderCheckbox.checked = validFileCount > 0 && checkedFileCount === validFileCount;
+
+        //Folder checkbox behaviour
+
+        folderCheckbox.addEventListener("change", async () => {
+          const checkboxes = fileListDiv.querySelectorAll("input[type='checkbox']")
+
+          checkboxes.forEach(cb => {
+            cb.checked = folderCheckbox.checked;
+          });
+
+          const selectedDocs = getSelectedDocuments();
+
+          await fetch("/set_active_documents", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Requested-With": "XMLHttpRequest"
+            },
+            credentials: "include",
+            body: JSON.stringify({
+              chat_id: currentChatId,
+              documents: selectedDocs
+            })
+          });
+        });
+
+        folderDiv.appendChild(fileListDiv);
+        filterContent.appendChild(folderDiv);
+      });
   }
+  catch(err){
+    console.error("Error loadinf documents.", err);
+    filterContent.innerHTML = "<p>Error loading documents.</p>"
+  }
+}
+
+async function loadMines()
+{
+ try
+ {
+  const res = await fetch("/get_mines", {
+    credentials: "include"
+  });
+
+  const mines = await res.json();
+
+  const welcomeSelect = document.getElementById("welcome-mine-select");
+  const chatSelect = document.getElementById("chat-mine-select");
+
+  if(welcomeSelect)
+  {
+    welcomeSelect.innerHTML = '<option value="">Select Mine</option>';
+  }
+  if(chatSelect)
+  {
+    chatSelect.innerHTML = '<option>Select Mine</option>';
+  }
+
+  mines.forEach(mine => {
+    const opt1 = document.createElement("option")
+    opt1.value = mine;
+    opt1.textContent = mine;
+
+    const opt2 = opt1.cloneNode(true);
+
+    if(welcomeSelect) welcomeSelect.appendChild(opt1);
+    if(chatSelect) chatSelect.appendChild(opt2);
+  });
+ }
+ catch(err)
+ {
+  console.error("Error loading mines:", err)
+ }
+}
+
+let currentMine = null;
+
+const welcomeMineSelect = document.getElementById("welcome-mine-select");
+const chatMineSelect = document.getElementById("chat-mine-select");
+
+if(welcomeMineSelect)
+{
+  welcomeMineSelect.addEventListener("change", () =>{
+    currentMine = welcomeMineSelect.value;
+    if(chatMineSelect) chatMineSelect.value = currentMine;
+    console.log("Selected mine:", currentMine);
+  });
+}
+
+if(chatMineSelect)
+{
+  chatMineSelect.addEventListener("change", () =>{
+    currentMine = chatMineSelect.value;
+    if(welcomeMineSelect) welcomeMineSelect.value = currentMine;
+    console.log("Selected mine:", currentMine);
+  });
+}
+
+async function handleCreateMine() {
+  const mineName = prompt("Enter new mine name:");
+  if(!mineName) return;
+
+  try
+  {
+    const res = await fetch("/create_mine", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      credentials: "include",
+      body: JSON.stringify({mine_name: mineName})
+    });
+
+    const data = await res.json();
+
+    if (res.ok)
+      {
+        alert("Mine created successfully.");
+        await loadMines();
+      }
+      else
+      {
+        alert(data.error || "Filed to create mine.")
+      }
+  }
+  catch (err)
+  {
+    console.error("Create mine failed:", err);
+  }
+};
+
+if(resizeHandle && filterSiderbar)
+{
+  let isResizing = false;
+
+  resizeHandle.addEventListener("mousedown", (e) => {
+    isResizing = true;
+    document.body.style.cursor = "ew-resize";
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!isResizing) return;
+    const newWidth = e.clientX - filterSiderbar.getBoundingClientRect().left;
+
+    if (newWidth >= 260 && newWidth <= 600) 
+      {
+        filterSiderbar.style.width = newWidth + "px";
+      }
+  });
+
+  document.addEventListener("mouseup", () => {
+    isResizing = false;
+    document.body.style.cursor = "default";
+  });
+
 }
