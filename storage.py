@@ -1,3 +1,14 @@
+"""
+PitPixie – Storage Module
+
+Author: Vanessa Perera
+
+Description:
+Handles Azure Blob Storage operations for the PitPixie system. This module
+manages document uploads, chat history storage, page map files, and the
+generation of secure access URLs for stored documents.
+"""
+
 from azure.storage.blob import BlobServiceClient, ContentSettings
 from load_secrets import get_secret
 from dotenv import load_dotenv
@@ -14,10 +25,9 @@ load_dotenv()
 ACCOUNT_NAME = get_secret("azure-storage-account")
 ACCOUNT_KEY = get_secret("azure-storage-key")
 MAIN_CONTAINER = get_secret("azure-storage-container")
-CHAT_CONTAINER = "chathistory"
+CHAT_CONTAINER = get_secret("chat-container")
 
-PAGE_MAP_CONTAINER = "pagemaps"
-
+PAGE_MAP_CONTAINER = get_secret("pagemap-container")
 
 connection_string = (
     f"DefaultEndpointsProtocol=https;"
@@ -51,7 +61,7 @@ except Exception:
     print("[storage] Page map container already exists.")
 
 # -------------------------------
-# Document Upload (unchanged)
+# Document Upload 
 # -------------------------------
 def upload_file_to_blob(file_path, blob_name):
     with open(file_path, "rb") as data:
@@ -65,7 +75,7 @@ def create_chat_id():
     return str(uuid.uuid4())
 
 # -------------------------------
-# CHAT LIST STORAGE (FIXED)
+# CHAT LIST STORAGE 
 # -------------------------------
 CHAT_LIST_BLOB = "chats.json"
 
@@ -125,7 +135,6 @@ def load_chat_history(chat_id):
     blob = chat_container_client.get_blob_client(blob_name)
 
     if not blob.exists():
-        #print(f"[storage] No history for {chat_id}")
         return []
 
     try:
@@ -136,9 +145,9 @@ def load_chat_history(chat_id):
         print("[storage] Chat load error:", e)
         return []
     
-# -------------------------------
+# -----------------------------------------------
 # Per chat active documents (checkbox filters)
-
+# -----------------------------------------------
 def save_active_documents(chat_id, documents):
     """Saves the active documents for a chat."""
     if documents is None:
@@ -170,7 +179,7 @@ def load_active_documents(chat_id):
             return []
         
         data = json.loads(blob.download_blob().readall())
-        return data.get("active_documents", [])
+        docs =  data.get("active_documents", [])
     
         if docs is None:
             return []

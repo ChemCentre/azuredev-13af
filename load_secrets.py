@@ -1,3 +1,14 @@
+"""
+PitPixie – Secret Management Module
+
+Author: Vanessa Perera
+
+Description:
+Handles secure retrieval of configuration values and credentials from Azure
+Key Vault using Azure Identity authentication. Secrets are cached locally to
+reduce repeated calls to the Key Vault service.
+"""
+
 from dotenv import load_dotenv
 from azure.identity import DefaultAzureCredential, ManagedIdentityCredential
 from azure.keyvault.secrets import SecretClient   
@@ -24,6 +35,7 @@ except Exception:
 secret_client = SecretClient(vault_url=VAULT_URL, credential=credential)
 
 #Helper function - Cached and Retry Safe 
+@lru_cache(maxsize=64)
 def get_secret(name: str):
     """Retrieve a secret value from Azure Key Vault.
        Cached in-memory to avoid repeated vault calls.

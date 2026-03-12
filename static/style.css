@@ -339,7 +339,7 @@ h3 {
 
 .settings-content select {
   margin-top: 6px;
-  width: auto; /* or set a fixed width like 200px */
+  width: auto; 
   min-width: 150px;
   max-width: 250px;
   padding: 8px;
@@ -613,7 +613,7 @@ button {
   align-items: center;
   justify-content: space-between;
   background: #2C7C89;
-  /*border: 1px solid #aaa;*/
+  
   border-radius: 10px;
   padding: 0;
   overflow: visible;
@@ -684,7 +684,7 @@ button {
   top: 46px;
   min-width: 160px;
 
-  background: #185763;   /* matches your sidebar colour */
+  background: #185763;   
   border: 1px solid #aaa;
   border-radius: 8px;
   padding: 6px 0;

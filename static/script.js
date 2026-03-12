@@ -41,7 +41,7 @@ const createMineBtnChat = document.getElementById("create-mine-btn-chat")
 
 
 // ------------------- STATE -------------------
-let chats = {};                // { chatId: [ { sender, text } ] }
+let chats = {};                
 let currentChatId = null;
 
 // ============================================================================
@@ -69,7 +69,6 @@ function addMessage(text, sender, save = true) {
   el.classList.add("message", sender);
 
   el.innerHTML = text.replace(/\n/g, "<br>"); // Preserve line breaks
-  //el.textContent = text;
   chatMessages.appendChild(el);
   chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -98,7 +97,6 @@ function createHistoryItem(chatId) {
 
   btn.addEventListener("click", async () => {
     await loadChat(chatId);
-    //switchToChat();
     showChatInterface();
   });
 
@@ -455,7 +453,7 @@ closeFilterBtn.addEventListener("click", () => {
 });
 
 // ============================================================================
-// Settings / About (unchanged)
+// Settings / About
 // ============================================================================
 settingsBtn.addEventListener("click", () => {
   chatWindow.style.display = "none";
@@ -480,7 +478,7 @@ backToChatFromAbout.addEventListener("click", () => {
 });
 
 // ============================================================================
-// Themes & Preferences (unchanged)
+// Themes & Preferences 
 // ============================================================================
 window.addEventListener("DOMContentLoaded", () => {
   const saved = localStorage.getItem("theme") || "light";
@@ -797,7 +795,7 @@ async function handleCreateMine() {
       }
       else
       {
-        alert(data.error || "Filed to create mine.")
+        alert(data.error || "Failed to create mine.")
       }
   }
   catch (err)

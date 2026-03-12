@@ -1,3 +1,15 @@
+"""
+PitPixie – Content Understanding Module
+
+Author: Vanessa Perera
+
+Description:
+This module integrates with Azure Content Understanding to analyse uploaded
+documents and extract printed page numbers. The extracted values are used to
+create a page map that helps reference the correct pages when generating AI
+responses.
+"""
+
 import requests
 import time
 from load_secrets import get_secret

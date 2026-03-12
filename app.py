@@ -1,3 +1,26 @@
+"""
+PitPixie – AI Document Analysis Tool
+
+Author: Vanessa Perera
+
+Description:
+Main Flask application for the PitPixie system. This file handles the web
+interface, chat interactions with the AI agent, document uploads, and
+integration with Azure services used in the Retrieval-Augmented Generation (RAG)
+pipeline.
+
+Technologies Used:
+- Flask (Python web framework)
+- Azure AI Foundry Agents
+- Azure Cognitive Search
+- Azure Blob Storage
+- Azure Content Understanding
+- Azure Key Vault
+
+This prototype was developed within the Shared Environmental Analytics
+Facility (SEAF) Azure environment.
+"""
+
 import os
 import threading
 from flask import Flask, request, jsonify, render_template, session, redirect
@@ -197,7 +220,6 @@ def new_chat():
     threads_map[chat_id] = thread_id
     session["threads_by_chat"] = threads_map
 
-    #session.pop("chat_id", None)  # Clear chat ID for new chat
     return jsonify({"status": "New chat started", "chat_id": chat_id})
 
 @app.route("/get_chat_list", methods=["GET"])
@@ -378,14 +400,9 @@ def query_azure_search(query: str, chat_id: str):
 
             for d in title_docs:
                 full_title = d.get("title", "")
-                base_name = full_title.split("/")[-1]
 
-                for selected in selected_docs:
-                    selected_base = selected.split("/")[-1]
-
-                    if base_name == selected_base:
-                        parent_ids.append(d.get("parent_id"))
-                        break
+                if full_title in selected_docs:
+                    parent_ids.append(d.get("parent_id"))
 
             if parent_ids:
                 filter_condition = " or ".join(
@@ -394,14 +411,14 @@ def query_azure_search(query: str, chat_id: str):
                 print("[DEBUG] Using checkbox filter:", filter_condition)
 
         # -------------------------------------------
-        # Search payload (IMPORTANT CHANGES HERE)
+        # Search payload 
         # -------------------------------------------
         payload = {
             "search": query,
             "queryType": "semantic",
             "semanticConfiguration": "mcpdocument-rag-search-semantic-configuration",
             "select": "chunk,title,parent_id,chunk_id",
-            "top": 40,  # <-- increase retrieval depth
+            "top": 40,  # <-- retrieval depth
             "vectorQueries": [{
                 "kind": "vector",
                 "fields": "text_vector",
@@ -430,7 +447,6 @@ def query_azure_search(query: str, chat_id: str):
         # Aggregate by document
         # -------------------------------------------
         per_doc = {}
-        #per_doc_page_i = {}
 
         for r in results:
             pid = r.get("parent_id")
@@ -471,7 +487,7 @@ def query_azure_search(query: str, chat_id: str):
                 f"[{title} - {page_text}]\n{chunk}"
             )
         # -------------------------------------------
-        # Build final context (balanced across docs)
+        # Build final context 
         # -------------------------------------------
         context_parts = []
         for pid, chunks in per_doc.items():
@@ -507,7 +523,7 @@ def build_retrieval_query(chat_id: str, user_message: str, max_turns: int = 4) -
     return user_message
 
 # ---------------------------------------------------------------------
-# Chat Endpoint - FIXED: Use consistent thread, not reset every message
+# Chat Endpoint - Use consistent thread, not reset every message
 # ---------------------------------------------------------------------
 @app.route("/send_message", methods=["POST"])
 @login_required
@@ -551,7 +567,6 @@ def send_message():
         # Use the same thread for the session - don't reset every message
         thread_id = get_thread_for_chat(chat_id)
 
-        #retrieval_query = build_retrieval_query(chat_id, user_message, max_turns=4)
         retrieval_query = user_message
         context = query_azure_search(retrieval_query, chat_id)
 
@@ -570,7 +585,7 @@ def send_message():
 
         is_meta_question = any(k in normalized for k in meta_keywords)
 
-        selected_docs = f"""
+        selected_docs_prompt = f"""
 Selected Documents:
 The user has selected the following documents for this chat:
 {selected_list}
@@ -602,19 +617,18 @@ INSTRUCTIONS:
 
 You MUST follow these formatting rules exactly.
 
-FORMAT RULES:
- - Each document MUST be on its own line
- - Each line MUST begin with "- "
- - Show ONLY the file name (no folder path)
- - Do NOT include a References section
- - Do NOT combine multiple documents on one line 
+FORMAT RULES: 
+- Each document MUST be on its own line 
+- Each line MUST begin with "- " 
+- Show ONLY the file name (no folder path) 
+- Do NOT include a References section 
+- Do NOT combine multiple documents on one line 
 
- OUTPUT EXAMPLE:
-
- You have selected:
-    - document1.pdf
-    - document2.pdf
-    - document3.pdf
+OUTPUT EXAMPLE: 
+You have selected: 
+- document1.pdf 
+- document2.pdf 
+- document3.pdf
 """
         else:
             instruction_block = """
@@ -625,16 +639,17 @@ You MUST follow these formatting rules exactly.
 RESPONSE FORMAT RULES:
 - Use clear structured formatting..
 - Each new point MUST start on a new line.
-- Use bullet points ("- ") for lists.
+- Use bullet points ("- ") for lists where appropriate.
 - Do NOT write everything in one paragraph.
 - Leave a blank line between sections.
 - Make responses easy to read.
 
 CONTENT RULES:
 You must answer using ONLY the information in CONTEXT.
+If the answer is not contained in the CONTEXT, say that the information is not available in the selected documents.
 
 REFERENCES RULES:
-You must include a section titled "References" at the end.
+You must include a section titles "References" at the end.
 
 The References section MUST:
  - Start with the word: References
@@ -643,25 +658,24 @@ The References section MUST:
  - Include the document file name
  - Include printed page number if available (e.g. "Printed page: 12")
 
-OUTPUT EXAMPLE:
-Three pit voids will remain at closure:
-- Darlot Main Pit
-- Eldorado Pit
-- Western Deep Leads Pit
+ OUTPUT EXAMPLE:
+ Three pit voids will remain at closure:
+ - Darlot Main Pit
+ - Eldorado Pit
+ - Western Deep Leads Pit
 
 References:
 - document1.pdf (Printed page: 12)
 - document2.pdf (Printed page: 5)
 
-
 DO NOT:
-- Invent references
-- Invent page numbers
-- Mention chunk IDs
-- Mention system internals
+- Invent references.
+- Do NOT invent page numbers.
+- Mention chunk IDs or system internals.
+
 """
 
-        message_text = f"""{selected_docs}{instruction_block}
+        message_text = f"""{selected_docs_prompt}{instruction_block}
 RECENT CHAT:    
 {recent_block}
 
