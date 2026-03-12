@@ -191,6 +191,22 @@ def logout():
     session.clear()
     return redirect("/login")
 
+def get_active_prefix():
+    """Return the currently active document prefix for the user session."""
+    return session.get("active_prefix")
+
+def set_active_prefix(prefix):
+    """Store the active document prefix in the user session."""
+    session["active_prefix"] = prefix.lower()
+    print(f"[DEBUG] Active document prefix set to: {prefix}")
+
+def clear_active_prefix():
+    """Clear the active document prefix """
+    if "active_prefix" in session:
+        print(f"[DEBUG] Cleared active prefix: {session['active_prefix']}")
+        del session["active_prefix"]
+
+
 # ---------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------
