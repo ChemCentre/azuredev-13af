@@ -1,9 +1,3 @@
-// ============================================================================
-// PitPixie Frontend Chat Interface
-// Chat UI, file upload, message sending, and communication with Flask backend.
-// Supports: chat-first OR upload-first on welcome screen and in-chat uploads.
-// ============================================================================
-
 // ------------------- DOM ELEMENTS -------------------
 const chatMessages     = document.querySelector(".chat-messages");
 const chatInputBar     = document.querySelector(".chat-input");
@@ -11,22 +5,18 @@ const input            = document.querySelector(".message-input");
 const sendBtn          = document.querySelector(".send-btn");
 const chatWindow       = document.querySelector(".chat-window");
 
-// Welcome screen
 const welcomeScreen    = document.querySelector(".welcome-screen");
 const welcomeForm      = document.getElementById("upload-form");
 const welcomeInput     = document.querySelector(".welcome-message-input");
 const welcomeFileInput = document.getElementById("welcome-file");
 
-// In-chat upload
 const fileInput        = document.getElementById("file-upload");
 
-// Sidebar / nav
 const newChatBtn            = document.querySelector(".new-chat-btn");
 const chatHistoryContainer  = document.querySelector(".chat-history");
 const sidebar               = document.querySelector(".sidebar");
 const toggleBtn             = document.querySelector(".toggle-btn");
 
-// Settings / About
 const settingsWindow        = document.getElementById("settings-window");
 const settingsBtn           = document.querySelector(".mini-icon[title='Settings']");
 const backToChat            = document.getElementById("back-to-chat");
@@ -34,21 +24,30 @@ const aboutWindow           = document.getElementById("about-window");
 const aboutBtn              = document.querySelector(".mini-icon[title='About']");
 const backToChatFromAbout   = document.getElementById("back-to-chat-from-about");
 
-// Export & Theme
 const exportBtn    = document.querySelector(".export-btn");
 const exportSelect = document.getElementById("config-export");
 const themeButtons = document.querySelectorAll("#config-theme .theme-option");
 
+const filterBtn      = document.querySelector(".mini-icon[title='Filter']");
+const filterSiderbar = document.getElementById("filter-sidebar");
+const closeFilterBtn = document.getElementById("close-filter");
+const filterContent  = document.querySelector(".filter-content");
+const resizeHandle   = document.getElementById("filter-resize-handle")
+
+//const mineSelect = document.getElementById("mine-select");
+const createMineBtnWelcome = document.getElementById("create-mine-btn-welcome");
+const createMineBtnChat = document.getElementById("create-mine-btn-chat")
+
+
+
 // ------------------- STATE -------------------
-let chats = {};                // { chatId: [ { sender, text } ] }
+let chats = {};                
 let currentChatId = null;
-let chatCounter = 0;
 
 // ============================================================================
 // UI helpers
 // ============================================================================
 function switchToChat() {
-  // Only switch if welcome is visible
   if (welcomeScreen && welcomeScreen.style.display !== "none") {
     welcomeScreen.style.display = "none";
     chatMessages.style.display = "flex";
@@ -68,72 +67,137 @@ function showTyping() {
 function addMessage(text, sender, save = true) {
   const el = document.createElement("div");
   el.classList.add("message", sender);
-  el.textContent = text;
+
+  el.innerHTML = text.replace(/\n/g, "<br>"); // Preserve line breaks
   chatMessages.appendChild(el);
   chatMessages.scrollTop = chatMessages.scrollHeight;
 
-  if (save) {
-    if (!currentChatId) createChat();
+  if (save && currentChatId) {
+    chats[currentChatId] = chats[currentChatId] || [];
     chats[currentChatId].push({ sender, text });
     updateHistoryPreview(currentChatId, text);
   }
 }
 
-function createChat() {
-  chatCounter++;
-  const id = `chat-${chatCounter}`;
-  chats[id] = [];
-
-  const btn = document.createElement("button");
-  btn.className = "history-item";
-  btn.textContent = `Chat ${chatCounter}`;
-  btn.dataset.chatId = id;
-  btn.addEventListener("click", () => setActiveChat(id));
-
-  chatHistoryContainer.appendChild(btn);
-  setActiveChat(id);
-  return id;
-}
-
-function setActiveChat(chatId) {
-  if (!chats[chatId]) return;
-  currentChatId = chatId;
-  chatWindow.style.display = "flex";
-  settingsWindow.style.display = "none";
-  aboutWindow.style.display = "none";
-
-  document.querySelectorAll(".chat-history .history-item").forEach(b =>
-    b.classList.toggle("active", b.dataset.chatId === chatId)
-  );
-  renderChat(chatId);
-}
-
-function renderChat(chatId) {
-  chatMessages.innerHTML = "";
-  (chats[chatId] || []).forEach(m => {
-    const el = document.createElement("div");
-    el.classList.add("message", m.sender);
-    el.textContent = m.text;
-    chatMessages.appendChild(el);
-  });
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
 function updateHistoryPreview(chatId, lastText) {
   const btn = chatHistoryContainer.querySelector(`[data-chat-id="${chatId}"]`);
   if (!btn) return;
-  const base = btn.textContent.split(" — ")[0];
-  const short = lastText.length > 30 ? `${lastText.slice(0,30)}…` : lastText;
-  btn.textContent = `${base} — ${short}`;
+  const preview = lastText.length > 30 ? `${lastText.slice(0,30)}…` : lastText;
+  btn.textContent = `Chat ${chatId.slice(0,8)} - ${preview}`;
 }
+
+function createHistoryItem(chatId) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "history-item-wrapper";
+
+  const btn = document.createElement("button");
+  btn.textContent = `Chat ${chatId.slice(0,8)}`;
+  btn.dataset.chatId = chatId;
+  btn.className = "history-item";
+
+  btn.addEventListener("click", async () => {
+    await loadChat(chatId);
+    showChatInterface();
+  });
+
+  btn.addEventListener("click", async () => {
+    await loadChat(chatId);
+    requestAnimationFrame(showChatInterface);
+  });
+
+  const optionsBtn = document.createElement("button");
+  optionsBtn.className = "history-item-options";
+  optionsBtn.innerHTML = "...";
+
+  const menu = document.createElement("div");
+  menu.className = "history-item-menu";
+
+  const delBtn = document.createElement("button");
+  delBtn.textContent = "Delete Chat";
+
+  delBtn.addEventListener("click", async () => {
+    const ok = confirm("Delete this chat permanently?");
+    if (!ok) return;
+
+    await fetch(`/delete_chat?chat_id=${chatId}`, {
+      method: "DELETE",
+      credentials: "include"
+    });
+
+    wrapper.remove();
+    if (currentChatId === chatId) {
+      chatMessages.innerHTML = "";
+      currentChatId = null;
+    }
+    menu.classList.remove("show");
+  });
+
+  menu.appendChild(delBtn);
+
+  optionsBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.classList.toggle("show");
+  });
+
+  wrapper.appendChild(btn);
+  wrapper.appendChild(optionsBtn);
+  wrapper.appendChild(menu);
+  return wrapper;
+}
+
+function showChatInterface()
+{
+  //Hide other pages
+  if (settingsWindow) settingsWindow.style.display = "none";
+  if (aboutWindow) aboutWindow.style.display = "none";
+
+  //Show main chat window
+  if (chatWindow) chatWindow.style.display = "flex";
+
+  //Ensure welcome screen is hidden
+  if (welcomeScreen) welcomeScreen.style.display = "none";
+
+  //Ensure chat parts are visible
+  if (chatMessages) chatMessages.style.display = "flex";
+  if (chatInputBar) chatInputBar.style.display = "flex";
+}
+
+if(createMineBtnWelcome)
+  {
+    createMineBtnWelcome.addEventListener("click", handleCreateMine);
+  }
+
+  if(createMineBtnChat)
+  {
+    createMineBtnChat.addEventListener("click", handleCreateMine);
+  }
 
 // ============================================================================
 // Network helpers
 // ============================================================================
+async function ensureChatId() {
+  if (currentChatId) return currentChatId;
+
+  const res = await fetch("/new_chat", {
+    method: "POST",
+    credentials: "include"
+  });
+  const data = await res.json();
+  currentChatId = data.chat_id;
+
+  chats[currentChatId] = [];
+
+  const item = createHistoryItem(currentChatId);
+  chatHistoryContainer.prepend(item);
+
+  return currentChatId;
+}
+
 async function sendToAgent(userText) {
   if (!userText) return;
   switchToChat();
-  if (!currentChatId) createChat();
+
+  await ensureChatId();
 
   addMessage(userText, "user");
   input.value = "";
@@ -142,9 +206,17 @@ async function sendToAgent(userText) {
   try {
     const res = await fetch("/send_message", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: userText })
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        message: userText,
+        chat_id: currentChatId
+      })
     });
+
     const data = await res.json();
     typingEl.remove();
     addMessage(data.response || "🤖 No response received.", "ai");
@@ -155,38 +227,83 @@ async function sendToAgent(userText) {
   }
 }
 
-async function uploadFile(file) {
-  if (!file) return { ok: false, response: "No file selected." };
+async function uploadFile(files) {
 
-  const formData = new FormData();
-  formData.append("doc_file", file);
+  if (!currentMine)
+  {
+    alert("Please select or create a mine first.");
+    return {ok: false}
+  }
+
+  if (!files || files.length === 0) 
+    return { ok: false, response: "No file selected." };
+
+  await ensureChatId();
 
   const typingEl = showTyping();
-  try {
-    const res = await fetch("/upload_file", { method: "POST", body: formData });
-    const data = await res.json();
+
+  try 
+  {
+    for (const file of files) 
+    {
+      const formData = new FormData();
+      formData.append("doc_file", file);
+      formData.append("chat_id", currentChatId);
+      formData.append("mine_name", currentMine);
+
+      const res = await fetch("/upload_file", {
+        method: "POST",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+        credentials: "include",
+        body: formData
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) 
+      {
+        addMessage(data.response || `❌ Failed to upload ${file.name}.`, "ai");
+      } else 
+      {
+        addMessage(data.response || `✅ Uploaded: ${file.name}`, "ai");
+      }
+    }
+    await fetch("/run_indexer", {
+      method: "POST",
+      credentials: "include"
+    });
     typingEl.remove();
-    addMessage(data.response || "✅ File uploaded.", "ai");
-    return { ok: true, data };
-  } catch (err) {
+
+    await refreshFilterDocumentsPreserveSelection();
+
+    return { ok: true };
+  }
+  catch (err) 
+  {
     typingEl.remove();
     addMessage("❌ Upload failed.", "ai");
-    console.error(err);
-    return { ok: false, err };
-  }
+
+    return { ok: false};
+  }  
 }
+
 
 // Handles combined welcome submission flow (upload → send)
 async function handleWelcomeSubmit() {
-  const file = welcomeFileInput.files[0] || null;
+  const files = Array.from(welcomeFileInput.files || []);
   const text = (welcomeInput.value || "").trim();
 
   switchToChat();
-  if (!currentChatId) createChat();
+  await ensureChatId();
 
-  if (file) {
-    addMessage(`📎 Uploaded: ${file.name}`, "user");
-    await uploadFile(file);
+  if(files.length > 0)
+  {
+    for (const file of files) 
+    {
+      addMessage(`📎 Uploaded: ${file.name}`, "user");
+    }
+
+    await uploadFile(files);
     welcomeFileInput.value = "";
   }
 
@@ -196,43 +313,57 @@ async function handleWelcomeSubmit() {
   }
 }
 
+async function refreshFilterDocumentsPreserveSelection()
+{
+  try 
+  {
+    const selectedDocs = getSelectedDocuments();
+    await loadFilteredDocuments(selectedDocs);
+
+    const sidebar = document.getElementById("filter-content");
+    if(sidebar)
+    {
+      sidebar.scrollTop = sidebar.scrollTop;
+    }
+  }
+  catch(err)
+  {
+    console.error("Failed to refresh filter documents:", err);
+  }
+}
+
 // ============================================================================
-// Welcome screen: submit handler (chat-first OR upload-first)
+// Welcome screen: submit handler
 // ============================================================================
 welcomeForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   await handleWelcomeSubmit();
 });
 
-// Also allow instant upload if a file is picked on welcome screen
 welcomeFileInput.addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
 
   switchToChat();
-  if (!currentChatId) createChat();
+  await ensureChatId();
 
-  addMessage(`📎 Uploaded: ${file.name}`, "user");
-  await uploadFile(file);
+  for (const file of files) {
+    addMessage(`📎 Uploaded: ${file.name}`, "user");
+  }
+  await uploadFile(files);
+
   e.target.value = "";
 });
 
 // ============================================================================
 // In-chat message sending & Enter key
 // ============================================================================
-
-// Send button click
 sendBtn.addEventListener("click", () => {
   const text = (input.value || "").trim();
   if (!text) return;
-  switchToChat();
   sendToAgent(text);
 });
 
-// Global Enter key handling (welcome & chat textareas)
-// - Enter sends
-// - Shift+Enter makes a newline
-// - IME-safe (ignore composing)
 document.addEventListener("keydown", (e) => {
   if (e.isComposing || e.keyCode === 229) return;
 
@@ -242,44 +373,50 @@ document.addEventListener("keydown", (e) => {
 
   if (!e.shiftKey && (e.key === "Enter" || e.key === "NumpadEnter") && (isWelcomeBox || isChatBox)) {
     e.preventDefault();
-
     const text = (active.value || "").trim();
     if (!text) return;
 
-    if (isWelcomeBox) {
-      // Sequential: upload first (if any), then send
-      handleWelcomeSubmit();
-    } else {
-      switchToChat();
-      sendToAgent(text);
-    }
+    if (isWelcomeBox) handleWelcomeSubmit();
+    else sendToAgent(text);
   }
 });
 
-// In-chat upload via the bottom "+" button
 fileInput.addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
 
   switchToChat();
-  if (!currentChatId) createChat();
+  await ensureChatId();
 
-  addMessage(`📎 Uploaded: ${file.name}`, "user");
-  await uploadFile(file);
+  for (const file of files) {
+    addMessage(`📎 Uploaded: ${file.name}`, "user");
+  }
+  await uploadFile(files);
   e.target.value = "";
 });
 
 // ============================================================================
 // UI controls
 // ============================================================================
+
+document.addEventListener("click", () =>{
+  document.querySelectorAll(".history-item-menu").forEach(menu => menu.classList.remove("show"));
+})
+
 toggleBtn.addEventListener("click", () => {
   sidebar.classList.toggle("collapsed");
   toggleBtn.textContent = sidebar.classList.contains("collapsed") ? "➡️" : "⬅️";
 });
 
-newChatBtn.addEventListener("click", () => createChat());
+newChatBtn.addEventListener("click", async () => {
+  // Force a brand new chat from backend
+  currentChatId = null;
+  chatMessages.innerHTML = "";
+  await ensureChatId();
+  showChatInterface();
+});
 
-// Export chat to CSV
+// Export chat to CSV (unchanged)
 exportBtn.addEventListener("click", () => {
   if (!currentChatId || !chats[currentChatId]?.length) {
     alert("No messages to export.");
@@ -303,6 +440,16 @@ exportBtn.addEventListener("click", () => {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+});
+
+// Filter sidebar
+filterBtn.addEventListener("click", async () => {
+  filterSiderbar.style.display = "flex";
+  await loadFilteredDocuments();
+});
+
+closeFilterBtn.addEventListener("click", () => {
+  filterSiderbar.style.display = "none";
 });
 
 // ============================================================================
@@ -331,26 +478,16 @@ backToChatFromAbout.addEventListener("click", () => {
 });
 
 // ============================================================================
-// Themes & Preferences
+// Themes & Preferences 
 // ============================================================================
 window.addEventListener("DOMContentLoaded", () => {
   const saved = localStorage.getItem("theme") || "light";
   applyTheme(saved);
 
-  const iframe = document.querySelector(".about-iframe");
-  if (iframe) {
-    iframe.addEventListener("load", () => {
-      iframe.contentWindow.postMessage({ theme: saved }, "*");
-    });
-  }
-
   themeButtons.forEach(btn => {
     btn.addEventListener("click", () => {
       const t = btn.dataset.theme;
       applyTheme(t);
-      if (iframe && iframe.contentWindow) {
-        iframe.contentWindow.postMessage({ theme: t }, "*");
-      }
     });
   });
 
@@ -364,4 +501,331 @@ function applyTheme(theme) {
   document.body.setAttribute("data-theme", theme);
   localStorage.setItem("theme", theme);
   themeButtons.forEach(btn => btn.classList.toggle("active", btn.dataset.theme === theme));
+}
+
+// ============================================================================
+// Load chat list on startup + auto-load first chat
+// ============================================================================
+window.addEventListener("DOMContentLoaded", async () => {
+  await loadMines();
+
+  const res = await fetch("/get_chat_list", { method: "GET", credentials: "include" });
+  const chatList = await res.json();
+
+  chatHistoryContainer.innerHTML = "";
+  chatList.forEach(entry => {
+    const chatId = entry.chat_id;
+    const item = createHistoryItem(chatId);
+    chatHistoryContainer.appendChild(item);
+  });
+
+  if (chatList.length > 0) {
+    await loadChat(chatList[0].chat_id);
+    switchToChat();
+  }
+});
+
+// ============================================================================
+// Load a chat + rehydrate filters (checkboxes)
+// ============================================================================
+async function loadChat(chatId) {
+  const res = await fetch(`/get_chat_history?chat_id=${chatId}`, {
+    method: "GET",
+    credentials: "include"
+  });
+
+  const data = await res.json();
+  const history = data.chat_history || [];
+  const activeDocs = data.active_documents || [];
+
+  chats[chatId] = history.map(m => ({
+    sender: m.role === "assistant" ? "ai" : "user",
+    text: m.message
+  }));
+
+  currentChatId = chatId;
+  renderChat(chatId);
+
+  document.querySelectorAll(".history-item").forEach(b =>
+    b.classList.toggle("active", b.dataset.chatId === chatId)
+  );
+
+  // If filter sidebar is open, reflect active docs immediately
+  if (filterSiderbar.style.display === "flex") {
+    await loadFilteredDocuments(activeDocs);
+  }
+}
+
+function renderChat(chatId) {
+  chatMessages.innerHTML = "";
+  (chats[chatId] || []).forEach(m => {
+    const el = document.createElement("div");
+    el.classList.add("message", m.sender);
+    el.innerHTML = m.text.replace(/\n/g, "<br>"); // Preserve line breaks
+    chatMessages.appendChild(el);
+  });
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// ============================================================================
+// Filters
+// ============================================================================
+function getSelectedDocuments() {
+  return Array.from(
+    document.querySelectorAll('.filter-doc-item input[type="checkbox"]:checked')
+  ).map(cb => cb.value);
+}
+
+async function loadFilteredDocuments(forceChecked = [])
+{
+  try
+  {
+    const response = await fetch("/get_filterdocuments", {
+      credentials: "include"
+    });
+
+    const structure = await response.json();
+
+    filterContent.innerHTML = "";
+
+    if(!structure || Object.keys(structure).length === 0)
+      {
+        filterContent.innerHTML = "<p>No documents available.</p>";
+        return;
+      }
+
+      Object.entries(structure).forEach(([mine, files]) => {
+
+        //folder container
+        const folderDiv = document.createElement("div");
+        folderDiv.className = "filter-folder";
+
+        const folderLabel = document.createElement("label");
+        folderLabel.className = "filter-folder-label";
+
+        //folder checkbox
+        const folderCheckbox = document.createElement("input");
+        folderCheckbox.type = "checkbox";
+        folderCheckbox.dataset.mine = mine;
+
+        folderLabel.appendChild(folderCheckbox);
+        folderLabel.appendChild(document.createTextNode(` ${mine}`));
+
+        folderDiv.appendChild(folderLabel);
+
+        //File Container
+        const fileListDiv = document.createElement("div");
+        fileListDiv.className = "filter-file-list";
+
+        let validFileCount = 0;
+        let checkedFileCount = 0;
+
+        files.forEach(filename => {
+
+          if(filename === ".init") return; //Skip .init files
+
+          validFileCount++;
+
+          const fullPath = `${mine}/${filename}`;
+
+          const fileLabel = document.createElement("label");
+          fileLabel.className = "filter-doc-item";
+
+          const fileCheckbox = document.createElement("input");
+          fileCheckbox.type = "checkbox";
+          fileCheckbox.value = fullPath;
+
+          if(forceChecked.includes(fullPath))
+          {
+            fileCheckbox.checked = true;
+            checkedFileCount++;
+          }
+
+          fileLabel.appendChild(fileCheckbox);
+          fileLabel.appendChild(document.createTextNode(`${filename}`));
+
+          fileListDiv.appendChild(fileLabel);
+
+          //Individual File Change
+
+          fileCheckbox.addEventListener("change", async () => {
+            const selectedDocs = getSelectedDocuments();
+
+            const allFiles = fileListDiv.querySelectorAll("input[type='checkbox']");
+            const checkedFiles = fileListDiv.querySelectorAll("input[type='checkbox']:checked");
+
+            folderCheckbox.checked = allFiles.length > 0 && allFiles.length === checkedFiles.length;
+
+            await fetch("/set_active_documents", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Requested-With": "XMLHttpRequest"
+              },
+              credentials: "include",
+              body: JSON.stringify({
+                chat_id: currentChatId,
+                documents: selectedDocs
+              })
+            });
+          });
+        });
+
+        folderCheckbox.checked = validFileCount > 0 && checkedFileCount === validFileCount;
+
+        //Folder checkbox behaviour
+
+        folderCheckbox.addEventListener("change", async () => {
+          const checkboxes = fileListDiv.querySelectorAll("input[type='checkbox']")
+
+          checkboxes.forEach(cb => {
+            cb.checked = folderCheckbox.checked;
+          });
+
+          const selectedDocs = getSelectedDocuments();
+
+          await fetch("/set_active_documents", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Requested-With": "XMLHttpRequest"
+            },
+            credentials: "include",
+            body: JSON.stringify({
+              chat_id: currentChatId,
+              documents: selectedDocs
+            })
+          });
+        });
+
+        folderDiv.appendChild(fileListDiv);
+        filterContent.appendChild(folderDiv);
+      });
+  }
+  catch(err){
+    console.error("Error loadinf documents.", err);
+    filterContent.innerHTML = "<p>Error loading documents.</p>"
+  }
+}
+
+async function loadMines()
+{
+ try
+ {
+  const res = await fetch("/get_mines", {
+    credentials: "include"
+  });
+
+  const mines = await res.json();
+
+  const welcomeSelect = document.getElementById("welcome-mine-select");
+  const chatSelect = document.getElementById("chat-mine-select");
+
+  if(welcomeSelect)
+  {
+    welcomeSelect.innerHTML = '<option value="">Select Mine</option>';
+  }
+  if(chatSelect)
+  {
+    chatSelect.innerHTML = '<option>Select Mine</option>';
+  }
+
+  mines.forEach(mine => {
+    const opt1 = document.createElement("option")
+    opt1.value = mine;
+    opt1.textContent = mine;
+
+    const opt2 = opt1.cloneNode(true);
+
+    if(welcomeSelect) welcomeSelect.appendChild(opt1);
+    if(chatSelect) chatSelect.appendChild(opt2);
+  });
+ }
+ catch(err)
+ {
+  console.error("Error loading mines:", err)
+ }
+}
+
+let currentMine = null;
+
+const welcomeMineSelect = document.getElementById("welcome-mine-select");
+const chatMineSelect = document.getElementById("chat-mine-select");
+
+if(welcomeMineSelect)
+{
+  welcomeMineSelect.addEventListener("change", () =>{
+    currentMine = welcomeMineSelect.value;
+    if(chatMineSelect) chatMineSelect.value = currentMine;
+    console.log("Selected mine:", currentMine);
+  });
+}
+
+if(chatMineSelect)
+{
+  chatMineSelect.addEventListener("change", () =>{
+    currentMine = chatMineSelect.value;
+    if(welcomeMineSelect) welcomeMineSelect.value = currentMine;
+    console.log("Selected mine:", currentMine);
+  });
+}
+
+async function handleCreateMine() {
+  const mineName = prompt("Enter new mine name:");
+  if(!mineName) return;
+
+  try
+  {
+    const res = await fetch("/create_mine", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      credentials: "include",
+      body: JSON.stringify({mine_name: mineName})
+    });
+
+    const data = await res.json();
+
+    if (res.ok)
+      {
+        alert("Mine created successfully.");
+        await loadMines();
+      }
+      else
+      {
+        alert(data.error || "Failed to create mine.")
+      }
+  }
+  catch (err)
+  {
+    console.error("Create mine failed:", err);
+  }
+};
+
+if(resizeHandle && filterSiderbar)
+{
+  let isResizing = false;
+
+  resizeHandle.addEventListener("mousedown", (e) => {
+    isResizing = true;
+    document.body.style.cursor = "ew-resize";
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!isResizing) return;
+    const newWidth = e.clientX - filterSiderbar.getBoundingClientRect().left;
+
+    if (newWidth >= 260 && newWidth <= 600) 
+      {
+        filterSiderbar.style.width = newWidth + "px";
+      }
+  });
+
+  document.addEventListener("mouseup", () => {
+    isResizing = false;
+    document.body.style.cursor = "default";
+  });
+
 }

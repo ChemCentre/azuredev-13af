@@ -1,3 +1,14 @@
+"""
+PitPixie – Azure AI Foundry Agent Connection Script
+
+Author: Vanessa Perera
+
+Description:
+Utility script for connecting to the Azure AI Foundry agent used in the
+PitPixie system. It creates a conversation thread, sends a test message,
+and retrieves the agent's response for testing and debugging purposes.
+"""
+
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents.models import ListSortOrder
@@ -17,8 +28,13 @@ project = AIProjectClient(
 )
 #Fetch the agent
 agent = project.agents.get_agent(agent_id)
-# Create a conversation thread
+
+#Create a conversation thread
 thread  = project.agents.threads.create()
+
+# Use the thread ID from session
+#thread_id = session["thread_id"]
+#print(f"[DEBUG] Using thread ID: {thread_id}")
 
 # Send a message to the agent
 message = project.agents.messages.create(
