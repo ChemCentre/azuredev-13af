@@ -416,7 +416,7 @@ newChatBtn.addEventListener("click", async () => {
   showChatInterface();
 });
 
-// Export chat to CSV (unchanged)
+// Export chat to CSV 
 exportBtn.addEventListener("click", () => {
   if (!currentChatId || !chats[currentChatId]?.length) {
     alert("No messages to export.");
